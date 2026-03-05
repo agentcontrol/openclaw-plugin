@@ -1,0 +1,17 @@
+{
+  "name": "@agentcontrol/openclaw-plugin",
+  "version": "0.1.0",
+  "description": "OpenClaw Agent Control plugin",
+  "type": "module",
+  "dependencies": {
+    "agent-control": "^1.0.1"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "id": "agent-control",
+  "name": "Agent Control",
+  "description": "Registers OpenClaw tools with Agent Control and blocks unsafe tool invocations.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "serverUrl": {
+        "type": "string"
+      },
+      "apiKey": {
+        "type": "string"
+      },
+      "agentName": {
+        "type": "string"
+      },
+      "agentId": {
+        "type": "string"
+      },
+      "agentVersion": {
+        "type": "string"
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "userAgent": {
+        "type": "string"
+      },
+      "failClosed": {
+        "type": "boolean"
+      }
+    }
+  },
+  "uiHints": {
+    "serverUrl": {
+      "label": "Server URL",
+      "help": "Base URL for Agent Control (example: http://localhost:8000)."
+    },
+    "apiKey": {
+      "label": "API Key",
+      "sensitive": true
+    },
+    "agentName": {
+      "label": "Agent Name Prefix",
+      "help": "Base name used for OpenClaw agents when registering with Agent Control."
+    },
+    "agentId": {
+      "label": "Agent UUID",
+      "help": "Optional fixed Agent Control UUID for single-agent deployments."
+    },
+    "failClosed": {
+      "label": "Fail Closed",
+      "help": "If true, block tool invocations when Agent Control is unavailable."
+    }
+  }
+}
