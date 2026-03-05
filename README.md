@@ -2,6 +2,10 @@
 
 Agent Control plugin for OpenClaw.
 
+> [!WARNING]
+> Experimental plugin: this project is currently a hacky integration and may
+> break across OpenClaw updates. Use in non-production or pinned environments.
+
 ## Local dev install (no publish)
 
 1. Clone this repo anywhere on disk.
