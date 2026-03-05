@@ -776,6 +776,7 @@ export default function register(api: OpenClawPluginApi) {
   api.on(
     "before_tool_call",
     async (event, ctx) => {
+      const beforeToolCallStartedAt = process.hrtime.bigint();
       const sourceAgentId = resolveSourceAgentId(ctx.agentId);
       const state = getOrCreateState(sourceAgentId);
       const argsForLog = formatToolArgsForLog(event.params);
@@ -784,89 +785,97 @@ export default function register(api: OpenClawPluginApi) {
       );
 
       try {
-        const nextSteps = await resolveStepsForContext({
-          api,
-          sourceAgentId,
-          sessionKey: ctx.sessionKey,
-          sessionId: ctx.sessionId,
-          runId: ctx.runId,
-        });
-        const nextStepsHash = hashSteps(nextSteps);
-        if (nextStepsHash !== state.stepsHash) {
-          state.steps = nextSteps;
-          state.stepsHash = nextStepsHash;
-        }
-        await syncAgent(state);
-      } catch (err) {
-        api.logger.warn(
-          `agent-control: unable to sync agent=${sourceAgentId} before tool evaluation: ${String(err)}`,
-        );
-        if (failClosed) {
-          return {
-            block: true,
-            blockReason: USER_BLOCK_MESSAGE,
-          };
-        }
-        return;
-      }
-
-      try {
-        const context = await buildEvaluationContext({
-          sourceAgentId,
-          state,
-          event: {
-            runId: event.runId,
-            toolCallId: event.toolCallId,
-          },
-          ctx: {
+        try {
+          const nextSteps = await resolveStepsForContext({
+            api,
+            sourceAgentId,
             sessionKey: ctx.sessionKey,
             sessionId: ctx.sessionId,
             runId: ctx.runId,
-            toolCallId: ctx.toolCallId,
-          },
-        });
-
-        api.logger.info(
-          `agent-control: before_tool_call evaluated agent=${sourceAgentId} tool=${event.toolName} args=${argsForLog} context=${JSON.stringify(context, null, 2)}`,
-        );
-
-        const evaluation = await client.evaluation.evaluate({
-          body: {
-            agentName: state.agentName,
-            stage: "pre",
-            step: {
-              type: "tool",
-              name: event.toolName,
-              input: event.params,
-              context,
-            },
-          },
-        });
-
-        if (evaluation.isSafe) {
-          api.logger.info("safe !");
+          });
+          const nextStepsHash = hashSteps(nextSteps);
+          if (nextStepsHash !== state.stepsHash) {
+            state.steps = nextSteps;
+            state.stepsHash = nextStepsHash;
+          }
+          await syncAgent(state);
+        } catch (err) {
+          api.logger.warn(
+            `agent-control: unable to sync agent=${sourceAgentId} before tool evaluation: ${String(err)}`,
+          );
+          if (failClosed) {
+            return {
+              block: true,
+              blockReason: USER_BLOCK_MESSAGE,
+            };
+          }
           return;
         }
 
-        api.logger.info("unsafe !");
-        api.logger.warn(
-          `agent-control: blocked tool=${event.toolName} agent=${sourceAgentId} reason=${buildBlockReason(evaluation)}`,
-        );
+        try {
+          const context = await buildEvaluationContext({
+            sourceAgentId,
+            state,
+            event: {
+              runId: event.runId,
+              toolCallId: event.toolCallId,
+            },
+            ctx: {
+              sessionKey: ctx.sessionKey,
+              sessionId: ctx.sessionId,
+              runId: ctx.runId,
+              toolCallId: ctx.toolCallId,
+            },
+          });
 
-        return {
-          block: true,
-          blockReason: USER_BLOCK_MESSAGE,
-        };
-      } catch (err) {
-        api.logger.warn(
-          `agent-control: evaluation failed for agent=${sourceAgentId} tool=${event.toolName}: ${String(err)}`,
-        );
-        if (failClosed) {
+          api.logger.info(
+            `agent-control: before_tool_call evaluated agent=${sourceAgentId} tool=${event.toolName} args=${argsForLog} context=${JSON.stringify(context, null, 2)}`,
+          );
+
+          const evaluation = await client.evaluation.evaluate({
+            body: {
+              agentName: state.agentName,
+              stage: "pre",
+              step: {
+                type: "tool",
+                name: event.toolName,
+                input: event.params,
+                context,
+              },
+            },
+          });
+
+          if (evaluation.isSafe) {
+            api.logger.info("safe !");
+            return;
+          }
+
+          api.logger.info("unsafe !");
+          api.logger.warn(
+            `agent-control: blocked tool=${event.toolName} agent=${sourceAgentId} reason=${buildBlockReason(evaluation)}`,
+          );
+
           return {
             block: true,
             blockReason: USER_BLOCK_MESSAGE,
           };
+        } catch (err) {
+          api.logger.warn(
+            `agent-control: evaluation failed for agent=${sourceAgentId} tool=${event.toolName}: ${String(err)}`,
+          );
+          if (failClosed) {
+            return {
+              block: true,
+              blockReason: USER_BLOCK_MESSAGE,
+            };
+          }
         }
+      } finally {
+        const durationSeconds =
+          Number(process.hrtime.bigint() - beforeToolCallStartedAt) / 1_000_000_000;
+        api.logger.info(
+          `agent-control: before_tool_call duration_sec=${durationSeconds.toFixed(3)} agent=${sourceAgentId} tool=${event.toolName}`,
+        );
       }
     },
     { priority: 100 },
