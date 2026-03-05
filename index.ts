@@ -535,15 +535,7 @@ export default function register(api: OpenClawPluginApi) {
       }
 
       try {
-        const evaluation = await client.evaluation.evaluate({
-          body: {
-            agentName: state.agentName,
-            stage: "pre",
-            step: {
-              type: "tool",
-              name: event.toolName,
-              input: event.params,
-              context: buildEvaluationContext({
+        const context = buildEvaluationContext({
                 sourceAgentId,
                 state,
                 event: {
@@ -556,7 +548,19 @@ export default function register(api: OpenClawPluginApi) {
                   runId: ctx.runId,
                   toolCallId: ctx.toolCallId,
                 },
-              }),
+              })
+
+        api.logger.info(`agent-control: before_tool_call evaluated agent=${sourceAgentId} tool=${event.toolName} args=${argsForLog} context=${context}`)
+
+        const evaluation = await client.evaluation.evaluate({
+          body: {
+            agentName: state.agentName,
+            stage: "pre",
+            step: {
+              type: "tool",
+              name: event.toolName,
+              input: event.params,
+              context: context
             },
           },
         });

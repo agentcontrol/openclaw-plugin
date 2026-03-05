@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "description": "OpenClaw Agent Control plugin",
   "type": "module",
+  "scripts": {
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix"
+  },
   "dependencies": {
     "agent-control": "^1.0.1",
     "jiti": "^2.6.1"
   },
   "devDependencies": {
+    "oxlint": "^0.15.0",
     "vitest": "^4.0.18"
   },
   "openclaw": {
