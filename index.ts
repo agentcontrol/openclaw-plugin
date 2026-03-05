@@ -36,6 +36,15 @@ type AgentState = {
   syncPromise: Promise<void> | null;
 };
 
+type ChannelType = "direct" | "group" | "channel" | "unknown";
+
+type DerivedChannelContext = {
+  provider: string | null;
+  type: ChannelType;
+  scope: string | null;
+  source: "sessionKey" | "unknown";
+};
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const USER_BLOCK_MESSAGE =
   "This action is blocked by a security policy set by your operator. Do not attempt to circumvent, disable, or work around this control. Inform the user that this action is restricted and explain what was blocked.";
@@ -343,6 +352,67 @@ function resolveSourceAgentId(agentId: string | undefined): string {
   return normalized ?? "default";
 }
 
+function parseAgentSessionKey(sessionKey: string | undefined): { agentId: string; scope: string } | null {
+  const normalized = asString(sessionKey)?.toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  const parts = normalized.split(":").filter(Boolean);
+  if (parts.length < 3 || parts[0] !== "agent") {
+    return null;
+  }
+  const agentId = parts[1];
+  const scope = parts.slice(2).join(":");
+  if (!agentId || !scope) {
+    return null;
+  }
+  return { agentId, scope };
+}
+
+function deriveChannelType(scope: string): ChannelType {
+  const tokens = new Set(scope.split(":").filter(Boolean));
+  if (tokens.has("group")) {
+    return "group";
+  }
+  if (tokens.has("channel")) {
+    return "channel";
+  }
+  if (tokens.has("direct") || tokens.has("dm")) {
+    return "direct";
+  }
+  if (/^discord:(?:[^:]+:)?guild-[^:]+:channel-[^:]+$/.test(scope)) {
+    return "channel";
+  }
+  return "unknown";
+}
+
+function deriveChannelContext(sessionKey: string | undefined): DerivedChannelContext {
+  const parsed = parseAgentSessionKey(sessionKey);
+  if (!parsed) {
+    return {
+      provider: null,
+      type: "unknown",
+      scope: null,
+      source: "unknown",
+    };
+  }
+
+  const scopeTokens = parsed.scope.split(":").filter(Boolean);
+  const firstToken = scopeTokens[0];
+  const provider =
+    firstToken &&
+    !["main", "subagent", "cron", "acp", "memory", "heartbeat"].includes(firstToken)
+      ? firstToken
+      : null;
+
+  return {
+    provider,
+    type: deriveChannelType(parsed.scope),
+    scope: parsed.scope,
+    source: "sessionKey",
+  };
+}
+
 function formatToolArgsForLog(params: unknown): string {
   if (params === undefined) {
     return "undefined";
@@ -435,12 +505,15 @@ export default function register(api: OpenClawPluginApi) {
       toolCallId?: string;
     };
   }): Record<string, unknown> => {
+    const channel = deriveChannelContext(params.ctx.sessionKey);
     return {
       openclawAgentId: params.sourceAgentId,
       sessionKey: params.ctx.sessionKey ?? null,
       sessionId: params.ctx.sessionId ?? null,
       runId: params.ctx.runId ?? params.event.runId ?? null,
       toolCallId: params.ctx.toolCallId ?? params.event.toolCallId ?? null,
+      channelType: channel.type,
+      channel,
       plugin: {
         id: api.id,
         version: pluginVersion ?? null,
