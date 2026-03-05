@@ -550,7 +550,7 @@ export default function register(api: OpenClawPluginApi) {
                 },
               })
 
-        api.logger.info(`agent-control: before_tool_call evaluated agent=${sourceAgentId} tool=${event.toolName} args=${argsForLog} context=${context}`)
+        api.logger.info(`agent-control: before_tool_call evaluated agent=${sourceAgentId} tool=${event.toolName} args=${argsForLog} context=${JSON.stringify(context, null, 2)}`)
 
         const evaluation = await client.evaluation.evaluate({
           body: {
