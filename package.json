@@ -4,7 +4,8 @@
   "description": "OpenClaw Agent Control plugin",
   "type": "module",
   "dependencies": {
-    "agent-control": "^1.0.1"
+    "agent-control": "^1.0.1",
+    "jiti": "^2.6.1"
   },
   "devDependencies": {
     "vitest": "^4.0.18"

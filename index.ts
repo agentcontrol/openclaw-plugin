@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { AgentControlClient } from "agent-control";
+import { createJiti } from "jiti";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 
 type AgentControlPluginConfig = {
@@ -37,6 +38,10 @@ type AgentState = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const requireFromPlugin = createRequire(import.meta.url);
+const jiti = createJiti(import.meta.url, {
+  interopDefault: true,
+  extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".json"],
+});
 
 type ToolCatalogInternals = {
   createOpenClawCodingTools: (params: {
@@ -134,6 +139,9 @@ async function importOpenClawInternalModule(
       continue;
     }
     try {
+      if (absolutePath.endsWith(".ts")) {
+        return jiti(absolutePath) as Record<string, unknown>;
+      }
       return (await import(pathToFileURL(absolutePath).href)) as Record<string, unknown>;
     } catch (err) {
       lastErr = err;
@@ -155,8 +163,14 @@ async function loadToolCatalogInternals(): Promise<ToolCatalogInternals> {
   toolCatalogInternalsPromise = (async () => {
     const openClawRoot = resolveOpenClawRootDir();
     const [piToolsModule, adapterModule] = await Promise.all([
-      importOpenClawInternalModule(openClawRoot, ["dist/agents/pi-tools.js"]),
-      importOpenClawInternalModule(openClawRoot, ["dist/agents/pi-tool-definition-adapter.js"]),
+      importOpenClawInternalModule(openClawRoot, [
+        "dist/agents/pi-tools.js",
+        "src/agents/pi-tools.ts",
+      ]),
+      importOpenClawInternalModule(openClawRoot, [
+        "dist/agents/pi-tool-definition-adapter.js",
+        "src/agents/pi-tool-definition-adapter.ts",
+      ]),
     ]);
 
     const createOpenClawCodingTools = piToolsModule.createOpenClawCodingTools;
