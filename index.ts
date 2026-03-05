@@ -384,6 +384,7 @@ export default function register(api: OpenClawPluginApi) {
   const failClosed = cfg.failClosed === true;
   const baseAgentName = asString(cfg.agentName) ?? "openclaw-agent";
   const configuredAgentVersion = asString(cfg.agentVersion);
+  const pluginVersion = asString(api.version);
 
   const client = new AgentControlClient();
   client.init({
@@ -416,6 +417,44 @@ export default function register(api: OpenClawPluginApi) {
     };
     states.set(sourceAgentId, created);
     return created;
+  };
+
+  const buildEvaluationContext = (params: {
+    sourceAgentId: string;
+    state: AgentState;
+    event: {
+      runId?: string;
+      toolCallId?: string;
+    };
+    ctx: {
+      sessionKey?: string;
+      sessionId?: string;
+      runId?: string;
+      toolCallId?: string;
+    };
+  }): Record<string, unknown> => {
+    return {
+      openclawAgentId: params.sourceAgentId,
+      sessionKey: params.ctx.sessionKey ?? null,
+      sessionId: params.ctx.sessionId ?? null,
+      runId: params.ctx.runId ?? params.event.runId ?? null,
+      toolCallId: params.ctx.toolCallId ?? params.event.toolCallId ?? null,
+      plugin: {
+        id: api.id,
+        version: pluginVersion ?? null,
+      },
+      policy: {
+        failClosed,
+        configuredAgentId: configuredAgentId ?? null,
+        configuredAgentVersion: configuredAgentVersion ?? null,
+      },
+      sync: {
+        agentName: params.state.agentName,
+        stepCount: params.state.steps.length,
+        stepsHash: params.state.stepsHash,
+        lastSyncedStepsHash: params.state.lastSyncedStepsHash,
+      },
+    };
   };
 
   const syncAgent = async (state: AgentState): Promise<void> => {
@@ -503,10 +542,20 @@ export default function register(api: OpenClawPluginApi) {
               type: "tool",
               name: event.toolName,
               input: event.params,
-              context: {
-                openclawAgentId: sourceAgentId,
-                sessionKey: ctx.sessionKey ?? null,
-              },
+              context: buildEvaluationContext({
+                sourceAgentId,
+                state,
+                event: {
+                  runId: event.runId,
+                  toolCallId: event.toolCallId,
+                },
+                ctx: {
+                  sessionKey: ctx.sessionKey,
+                  sessionId: ctx.sessionId,
+                  runId: ctx.runId,
+                  toolCallId: ctx.toolCallId,
+                },
+              }),
             },
           },
         });
