@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "agent-control": "^1.0.1",
-    "jiti": "^2.6.1"
+    "jiti": "^2.6.1",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "oxlint": "^0.15.0",
