@@ -54,13 +54,6 @@ const jiti = createJiti(import.meta.url, {
   interopDefault: true,
   extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".json"],
 });
-const TSX_IMPORT_SPECIFIER = (() => {
-  try {
-    return pathToFileURL(requireFromPlugin.resolve("tsx")).href;
-  } catch {
-    return "tsx";
-  }
-})();
 
 type ToolCatalogInternals = {
   createOpenClawCodingTools: (params: {
@@ -148,6 +141,19 @@ function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function resolveTsxImportSpecifier(sidecarPath: string): string {
+  const sidecarDir = path.dirname(sidecarPath);
+  const localLoader = path.join(sidecarDir, "node_modules", "tsx", "dist", "loader.mjs");
+  if (fs.existsSync(localLoader)) {
+    return pathToFileURL(localLoader).href;
+  }
+  try {
+    return pathToFileURL(requireFromPlugin.resolve("tsx")).href;
+  } catch {
+    return "tsx";
+  }
 }
 
 class ToolSchemaSidecarClient {
@@ -282,6 +288,7 @@ class ToolSchemaSidecarClient {
     }
 
     const sidecarPath = fileURLToPath(new URL("./tool-schema-sidecar.ts", import.meta.url));
+    const tsxImportSpecifier = resolveTsxImportSpecifier(sidecarPath);
     const startPromise = (async () => {
       const startedAt = process.hrtime.bigint();
       const previousSpawnAgeMs = Date.now() - this.lastSpawnAtMs;
@@ -301,7 +308,7 @@ class ToolSchemaSidecarClient {
       }
 
       const sidecarCwd = path.dirname(sidecarPath);
-      const child = spawn(process.execPath, ["--import", TSX_IMPORT_SPECIFIER, sidecarPath], {
+      const child = spawn(process.execPath, ["--import", tsxImportSpecifier, sidecarPath], {
         stdio: ["pipe", "pipe", "pipe"],
         cwd: sidecarCwd,
         env: {
@@ -345,7 +352,7 @@ class ToolSchemaSidecarClient {
       this.process = child;
       this.stdoutBuffer = "";
       this.logger.info(
-        `agent-control: sidecar started pid=${child.pid ?? "unknown"} generation=${generation} restart_count=${this.restartCount} reason=${reason} start_sec=${secondsSince(startedAt)}`,
+        `agent-control: sidecar started pid=${child.pid ?? "unknown"} generation=${generation} restart_count=${this.restartCount} reason=${reason} start_sec=${secondsSince(startedAt)} node_exec=${process.execPath} sidecar_path=${sidecarPath} tsx_import=${tsxImportSpecifier}`,
       );
       return child;
     })().finally(() => {
@@ -1103,6 +1110,9 @@ export default function register(api: OpenClawPluginApi) {
       api.logger.info(
         `agent-control: sidecar prewarm trigger=${trigger} deduped=${deduped} duration_sec=${secondsSince(prewarmStartedAt)} openclaw_root=${sidecar.getOpenClawRoot()}`,
       );
+      api.logger.info(
+        `agent-control: sidecar ready trigger=${trigger} prewarm_done=true`,
+      );
     } catch (error) {
       api.logger.warn(
         `agent-control: sidecar prewarm trigger=${trigger} deduped=${deduped} failed=${describeError(error)}`,
@@ -1267,6 +1277,11 @@ export default function register(api: OpenClawPluginApi) {
       api.logger.info(
         `agent-control: before_tool_call entered agent=${sourceAgentId} tool=${event.toolName} args=${argsForLog}`,
       );
+      if (sidecar?.isPrewarmInFlight()) {
+        api.logger.info(
+          `agent-control: before_tool_call waiting_for_sidecar_prewarm=true agent=${sourceAgentId} tool=${event.toolName}`,
+        );
+      }
 
       try {
         try {
