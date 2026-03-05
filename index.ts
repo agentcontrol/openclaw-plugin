@@ -50,9 +50,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const USER_BLOCK_MESSAGE =
   "This action is blocked by a security policy set by your operator. Do not attempt to circumvent, disable, or work around this control. Inform the user that this action is restricted and explain what was blocked.";
 const requireFromPlugin = createRequire(import.meta.url);
+const PLUGIN_ROOT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const JITI_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".json"];
+const SHARED_JITI_CACHE_DIR = path.join(PLUGIN_ROOT_DIR, "node_modules", ".cache", "jiti");
+const SIDECAR_OPENCLAW_ROOT_ENV = "AGENT_CONTROL_OPENCLAW_ROOT";
+const SIDECAR_JITI_CACHE_DIR_ENV = "AGENT_CONTROL_JITI_CACHE_DIR";
 const jiti = createJiti(import.meta.url, {
   interopDefault: true,
-  extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".json"],
+  extensions: JITI_EXTENSIONS,
+  fsCache: SHARED_JITI_CACHE_DIR,
 });
 
 type ToolCatalogInternals = {
@@ -72,7 +78,7 @@ type ToolCatalogInternals = {
   }>;
 };
 
-type SidecarToolCatalogResponse = {
+type ToolCatalogResolution = {
   steps: AgentControlStep[];
   internalsDurationSec: string;
   createToolsDurationSec: string;
@@ -80,21 +86,7 @@ type SidecarToolCatalogResponse = {
   toolsCount: number;
 };
 
-type SidecarPendingRequest = {
-  id: number;
-  generation: number;
-  type: "prewarm" | "resolve_steps";
-  startedAt: bigint;
-  settled: boolean;
-  resolve: (value: unknown) => void;
-  reject: (reason?: unknown) => void;
-  timeout: NodeJS.Timeout;
-};
-
-type SidecarRequestPayload = {
-  type: "prewarm" | "resolve_steps";
-  params: Record<string, unknown>;
-};
+type SidecarPrewarmTerminalState = "idle" | "running" | "succeeded" | "failed" | "stopped";
 
 type SessionStoreInternals = {
   loadConfig: () => Record<string, unknown>;
@@ -121,26 +113,16 @@ type SessionMetadataCacheEntry = {
 
 let toolCatalogInternalsPromise: Promise<ToolCatalogInternals> | null = null;
 let sessionStoreInternalsPromise: Promise<SessionStoreInternals> | null = null;
+let resolvedOpenClawRootDir: string | null = null;
 const sessionMetadataCache = new Map<string, SessionMetadataCacheEntry>();
 const SESSION_META_CACHE_TTL_MS = 2_000;
 const SESSION_META_CACHE_MAX = 512;
-const SIDECAR_REQUEST_TIMEOUT_MS = 60_000;
-const SIDECAR_RESTART_COOLDOWN_MS = 1_000;
 
 function describeError(error: unknown): string {
   if (error instanceof Error) {
     return error.message || String(error);
   }
   return String(error);
-}
-
-function sleepMs(ms: number): Promise<void> {
-  if (ms <= 0) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 function resolveTsxImportSpecifier(sidecarPath: string): string {
@@ -156,22 +138,15 @@ function resolveTsxImportSpecifier(sidecarPath: string): string {
   }
 }
 
-class ToolSchemaSidecarClient {
-  private process: ChildProcessWithoutNullStreams | null = null;
-  private stdoutBuffer = "";
-  private startPromise: Promise<ChildProcessWithoutNullStreams> | null = null;
+class JitiPrewarmSidecar {
+  private child: ChildProcessWithoutNullStreams | null = null;
   private prewarmPromise: Promise<void> | null = null;
-  private requestChain: Promise<void> = Promise.resolve();
-  private queuedRequests = 0;
-  private nextRequestId = 1;
-  private readonly pending = new Map<number, SidecarPendingRequest>();
-  private generation = 0;
-  private restartCount = 0;
-  private lastSpawnAtMs = 0;
-  private stopped = false;
+  private startedAt: bigint | null = null;
+  private terminalState: SidecarPrewarmTerminalState = "idle";
 
   constructor(
     private readonly openClawRoot: string,
+    private readonly cacheDir: string,
     private readonly logger: OpenClawPluginApi["logger"],
   ) {}
 
@@ -179,350 +154,137 @@ class ToolSchemaSidecarClient {
     return this.prewarmPromise !== null;
   }
 
-  getOpenClawRoot(): string {
-    return this.openClawRoot;
+  getCacheDir(): string {
+    return this.cacheDir;
   }
 
-  prewarm(): Promise<void> {
-    this.stopped = false;
+  getTerminalState(): SidecarPrewarmTerminalState {
+    return this.terminalState;
+  }
+
+  waitForPrewarmCompletion(): Promise<void> {
+    return this.prewarmPromise ?? Promise.resolve();
+  }
+
+  prewarm(trigger: "gateway_start"): Promise<void> {
     if (this.prewarmPromise) {
       return this.prewarmPromise;
     }
-    const promise = this.request({
-      type: "prewarm",
-      params: {
-        openClawRoot: this.openClawRoot,
-      },
-    })
-      .then(() => undefined)
-      .finally(() => {
-        if (this.prewarmPromise === promise) {
-          this.prewarmPromise = null;
-        }
-      });
-    this.prewarmPromise = promise;
-    return promise;
-  }
-
-  async resolveSteps(params: {
-    sourceAgentId: string;
-    sessionKey?: string;
-    sessionId?: string;
-    runId?: string;
-    config: Record<string, unknown>;
-  }): Promise<SidecarToolCatalogResponse> {
-    const result = await this.request({
-      type: "resolve_steps",
-      params: {
-        openClawRoot: this.openClawRoot,
-        sourceAgentId: params.sourceAgentId,
-        sessionKey: params.sessionKey,
-        sessionId: params.sessionId,
-        runId: params.runId,
-        config: params.config,
-      },
-    });
-    if (!result || typeof result !== "object") {
-      throw new Error("agent-control: sidecar returned invalid resolve_steps response");
-    }
-    const raw = result as Partial<SidecarToolCatalogResponse>;
-    if (!Array.isArray(raw.steps)) {
-      throw new Error("agent-control: sidecar resolve_steps response is missing steps[]");
-    }
-    return {
-      steps: raw.steps as AgentControlStep[],
-      internalsDurationSec: typeof raw.internalsDurationSec === "string" ? raw.internalsDurationSec : "0.000",
-      createToolsDurationSec:
-        typeof raw.createToolsDurationSec === "string" ? raw.createToolsDurationSec : "0.000",
-      adaptDurationSec: typeof raw.adaptDurationSec === "string" ? raw.adaptDurationSec : "0.000",
-      toolsCount: typeof raw.toolsCount === "number" ? raw.toolsCount : raw.steps.length,
-    };
-  }
-
-  stop(reason = "manual") {
-    this.stopped = true;
-    this.startPromise = null;
-    this.prewarmPromise = null;
-    const queueDepth = this.queueDepth();
-    this.logger.info(
-      `agent-control: sidecar stop reason=${reason} generation=${this.generation} restart_count=${this.restartCount} queue_depth=${queueDepth}`,
-    );
-
-    const child = this.process;
-    this.process = null;
-    this.stdoutBuffer = "";
-    const pendingError = new Error(`agent-control: sidecar stopped (${reason})`);
-    for (const [id, entry] of this.pending.entries()) {
-      this.pending.delete(id);
-      if (entry.settled) {
-        continue;
-      }
-      entry.settled = true;
-      clearTimeout(entry.timeout);
-      entry.reject(pendingError);
-    }
-
-    if (child && child.exitCode === null && !child.killed) {
-      child.kill();
-    }
-  }
-
-  private queueDepth(): number {
-    return Math.max(this.queuedRequests, this.pending.size);
-  }
-
-  private async ensureRunning(
-    reason: "prewarm" | "resolve_steps",
-  ): Promise<ChildProcessWithoutNullStreams> {
-    const existing = this.process;
-    if (existing && existing.exitCode === null && !existing.killed) {
-      return existing;
-    }
-
-    if (this.startPromise) {
-      return this.startPromise;
-    }
-
-    if (this.stopped) {
-      throw new Error("agent-control: sidecar is stopped");
+    if (this.terminalState !== "idle") {
+      return Promise.resolve();
     }
 
     const sidecarPath = fileURLToPath(new URL("./tool-schema-sidecar.ts", import.meta.url));
     const tsxImportSpecifier = resolveTsxImportSpecifier(sidecarPath);
-    const startPromise = (async () => {
-      const startedAt = process.hrtime.bigint();
-      const previousSpawnAgeMs = Date.now() - this.lastSpawnAtMs;
-      const isRestart = this.generation > 0;
-      const cooldownMs =
-        isRestart && previousSpawnAgeMs < SIDECAR_RESTART_COOLDOWN_MS
-          ? SIDECAR_RESTART_COOLDOWN_MS - previousSpawnAgeMs
-          : 0;
-      if (cooldownMs > 0) {
-        this.logger.info(
-          `agent-control: sidecar restart backoff_ms=${cooldownMs} generation=${this.generation} restart_count=${this.restartCount} reason=${reason}`,
-        );
-        await sleepMs(cooldownMs);
-      }
-      if (this.stopped) {
-        throw new Error("agent-control: sidecar startup cancelled because client is stopped");
-      }
+    const sidecarCwd = path.dirname(sidecarPath);
 
-      const sidecarCwd = path.dirname(sidecarPath);
-      const child = spawn(process.execPath, ["--import", tsxImportSpecifier, sidecarPath], {
+    this.terminalState = "running";
+    this.startedAt = process.hrtime.bigint();
+
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = spawn(process.execPath, ["--import", tsxImportSpecifier, sidecarPath], {
         stdio: ["pipe", "pipe", "pipe"],
         cwd: sidecarCwd,
         env: {
           ...process.env,
+          [SIDECAR_OPENCLAW_ROOT_ENV]: this.openClawRoot,
+          [SIDECAR_JITI_CACHE_DIR_ENV]: this.cacheDir,
         },
       });
-      this.lastSpawnAtMs = Date.now();
-      this.generation += 1;
-      if (this.generation > 1) {
-        this.restartCount += 1;
+    } catch (error) {
+      this.terminalState = "failed";
+      this.startedAt = null;
+      this.logger.warn(
+        `agent-control: sidecar prewarm trigger=${trigger} failed_to_spawn=true openclaw_root=${this.openClawRoot} cache_dir=${this.cacheDir} error=${describeError(error)}`,
+      );
+      return Promise.resolve();
+    }
+
+    this.child = child;
+    this.logger.info(
+      `agent-control: sidecar prewarm started trigger=${trigger} pid=${child.pid ?? "unknown"} openclaw_root=${this.openClawRoot} cache_dir=${this.cacheDir} sidecar_path=${sidecarPath} tsx_import=${tsxImportSpecifier}`,
+    );
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string | Buffer) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed.length > 0) {
+          this.logger.info(`agent-control: sidecar stdout: ${trimToMax(trimmed, 1000)}`);
+        }
       }
-      const generation = this.generation;
+    });
 
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string | Buffer) => {
-        this.handleStdoutChunk(
-          generation,
-          typeof chunk === "string" ? chunk : chunk.toString("utf8"),
-        );
-      });
-
-      child.stderr.setEncoding("utf8");
-      child.stderr.on("data", (chunk: string | Buffer) => {
-        const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-        const trimmed = text.trim();
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string | Buffer) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
         if (trimmed.length > 0) {
           this.logger.warn(`agent-control: sidecar stderr: ${trimToMax(trimmed, 1000)}`);
         }
+      }
+    });
+
+    const promise = new Promise<void>((resolve) => {
+      let settled = false;
+      const settle = (state: SidecarPrewarmTerminalState, detail: string): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.child = null;
+        const durationSec = this.startedAt ? secondsSince(this.startedAt) : "0.000";
+        this.startedAt = null;
+        this.terminalState = state;
+        if (state === "succeeded") {
+          this.logger.info(
+            `agent-control: sidecar prewarm done trigger=${trigger} duration_sec=${durationSec} openclaw_root=${this.openClawRoot} cache_dir=${this.cacheDir} terminal_state=${state}`,
+          );
+        } else {
+          this.logger.warn(
+            `agent-control: sidecar prewarm done trigger=${trigger} duration_sec=${durationSec} openclaw_root=${this.openClawRoot} cache_dir=${this.cacheDir} terminal_state=${state} ${detail}`,
+          );
+        }
+        resolve();
+      };
+
+      child.on("error", (error) => {
+        settle("failed", `error=${describeError(error)}`);
       });
 
       child.on("exit", (code, signal) => {
-        this.handleProcessExit(generation, code, signal);
+        if (this.terminalState === "stopped") {
+          settle("stopped", `code=${code ?? "null"} signal=${signal ?? "null"}`);
+          return;
+        }
+        if (code === 0) {
+          settle("succeeded", `code=${code}`);
+          return;
+        }
+        settle("failed", `code=${code ?? "null"} signal=${signal ?? "null"}`);
       });
-
-      child.on("error", (error) => {
-        this.logger.warn(
-          `agent-control: sidecar process error generation=${generation}: ${describeError(error)}`,
-        );
-      });
-
-      this.process = child;
-      this.stdoutBuffer = "";
-      this.logger.info(
-        `agent-control: sidecar started pid=${child.pid ?? "unknown"} generation=${generation} restart_count=${this.restartCount} reason=${reason} start_sec=${secondsSince(startedAt)} node_exec=${process.execPath} sidecar_path=${sidecarPath} tsx_import=${tsxImportSpecifier}`,
-      );
-      return child;
-    })().finally(() => {
-      if (this.startPromise === startPromise) {
-        this.startPromise = null;
+    }).finally(() => {
+      if (this.prewarmPromise === promise) {
+        this.prewarmPromise = null;
       }
     });
 
-    this.startPromise = startPromise;
-    return startPromise;
+    this.prewarmPromise = promise;
+    return promise;
   }
 
-  private handleProcessExit(
-    generation: number,
-    code: number | null,
-    signal: NodeJS.Signals | null,
-  ): void {
-    if (generation !== this.generation) {
+  stop(reason = "manual") {
+    if (!this.child || this.child.exitCode !== null || this.child.killed) {
       return;
     }
-    if (this.process) {
-      this.process = null;
-    }
-    this.stdoutBuffer = "";
-    const queueDepth = this.queueDepth();
-    const err = new Error(
-      `agent-control: sidecar exited (code=${code ?? "null"} signal=${signal ?? "null"})`,
+    this.terminalState = "stopped";
+    this.logger.info(
+      `agent-control: sidecar stop reason=${reason} openclaw_root=${this.openClawRoot} cache_dir=${this.cacheDir}`,
     );
-    for (const [id, entry] of this.pending.entries()) {
-      if (entry.generation !== generation) {
-        continue;
-      }
-      this.pending.delete(id);
-      if (entry.settled) {
-        continue;
-      }
-      entry.settled = true;
-      clearTimeout(entry.timeout);
-      entry.reject(err);
-    }
-    this.logger.warn(
-      `agent-control: sidecar exit generation=${generation} restart_count=${this.restartCount} queue_depth=${queueDepth} code=${code ?? "null"} signal=${signal ?? "null"}`,
-    );
-  }
-
-  private handleStdoutChunk(generation: number, chunk: string) {
-    if (generation !== this.generation) {
-      return;
-    }
-    this.stdoutBuffer += chunk;
-    while (true) {
-      const newlineIndex = this.stdoutBuffer.indexOf("\n");
-      if (newlineIndex === -1) {
-        return;
-      }
-      const line = this.stdoutBuffer.slice(0, newlineIndex).trim();
-      this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
-      if (line.length === 0) {
-        continue;
-      }
-      this.handleStdoutLine(generation, line);
-    }
-  }
-
-  private handleStdoutLine(generation: number, line: string) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      this.logger.warn(`agent-control: sidecar produced non-JSON output: ${trimToMax(line, 500)}`);
-      return;
-    }
-    if (!parsed || typeof parsed !== "object") {
-      this.logger.warn("agent-control: sidecar produced invalid message payload");
-      return;
-    }
-    const message = parsed as {
-      id?: unknown;
-      ok?: unknown;
-      result?: unknown;
-      error?: unknown;
-    };
-    if (typeof message.id !== "number") {
-      this.logger.warn("agent-control: sidecar response missing numeric id");
-      return;
-    }
-    const pending = this.pending.get(message.id);
-    if (!pending) {
-      return;
-    }
-    if (pending.generation !== generation || pending.settled) {
-      return;
-    }
-    this.pending.delete(message.id);
-    pending.settled = true;
-    clearTimeout(pending.timeout);
-
-    if (message.ok === true) {
-      pending.resolve(message.result as SidecarToolCatalogResponse);
-      return;
-    }
-
-    const errorMessage = typeof message.error === "string" ? message.error : "sidecar request failed";
-    pending.reject(new Error(`agent-control: ${errorMessage}`));
-  }
-
-  private enqueueRequest<T>(work: () => Promise<T>): Promise<T> {
-    this.queuedRequests += 1;
-    const run = this.requestChain.then(work, work);
-    this.requestChain = run.then(
-      () => {
-        this.queuedRequests = Math.max(0, this.queuedRequests - 1);
-      },
-      () => {
-        this.queuedRequests = Math.max(0, this.queuedRequests - 1);
-      },
-    );
-    return run;
-  }
-
-  private request(payload: SidecarRequestPayload): Promise<unknown> {
-    return this.enqueueRequest(async () => {
-      const child = await this.ensureRunning(payload.type);
-      const generation = this.generation;
-      const id = this.nextRequestId++;
-      const message = JSON.stringify({
-        id,
-        type: payload.type,
-        params: payload.params,
-      });
-
-      return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          const pending = this.pending.get(id);
-          if (!pending || pending.generation !== generation || pending.settled) {
-            return;
-          }
-          this.pending.delete(id);
-          pending.settled = true;
-          reject(
-            new Error(`agent-control: sidecar request timed out after ${SIDECAR_REQUEST_TIMEOUT_MS}ms`),
-          );
-        }, SIDECAR_REQUEST_TIMEOUT_MS);
-
-        this.pending.set(id, {
-          id,
-          generation,
-          type: payload.type,
-          startedAt: process.hrtime.bigint(),
-          settled: false,
-          resolve,
-          reject,
-          timeout,
-        });
-
-        child.stdin.write(`${message}\n`, "utf8", (error) => {
-          if (!error) {
-            return;
-          }
-          const pending = this.pending.get(id);
-          if (!pending || pending.generation !== generation || pending.settled) {
-            return;
-          }
-          this.pending.delete(id);
-          pending.settled = true;
-          clearTimeout(pending.timeout);
-          reject(new Error(`agent-control: failed to write sidecar request: ${describeError(error)}`));
-        });
-      });
-    });
+    this.child.kill();
   }
 }
 
@@ -592,6 +354,13 @@ function resolveOpenClawRootDir(): string {
   return found;
 }
 
+function getResolvedOpenClawRootDir(): string {
+  if (!resolvedOpenClawRootDir) {
+    resolvedOpenClawRootDir = resolveOpenClawRootDir();
+  }
+  return resolvedOpenClawRootDir;
+}
+
 async function importOpenClawInternalModule(
   openClawRoot: string,
   candidates: string[],
@@ -625,7 +394,7 @@ async function loadToolCatalogInternals(): Promise<ToolCatalogInternals> {
   }
 
   toolCatalogInternalsPromise = (async () => {
-    const openClawRoot = resolveOpenClawRootDir();
+    const openClawRoot = getResolvedOpenClawRootDir();
     const [piToolsModule, adapterModule] = await Promise.all([
       importOpenClawInternalModule(openClawRoot, [
         "dist/agents/pi-tools.js",
@@ -661,7 +430,7 @@ async function loadSessionStoreInternals(): Promise<SessionStoreInternals> {
   }
 
   sessionStoreInternalsPromise = (async () => {
-    const openClawRoot = resolveOpenClawRootDir();
+    const openClawRoot = getResolvedOpenClawRootDir();
     const [configModule, sessionsModule] = await Promise.all([
       importOpenClawInternalModule(openClawRoot, [
         "dist/config/config.js",
@@ -732,6 +501,23 @@ function toJsonRecord(value: unknown): Record<string, unknown> | undefined {
   }
 }
 
+function sanitizeToolCatalogConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const pluginsRaw = config.plugins;
+  if (!isRecord(pluginsRaw)) {
+    return {
+      ...config,
+      plugins: { enabled: false },
+    };
+  }
+  return {
+    ...config,
+    plugins: {
+      ...pluginsRaw,
+      enabled: false,
+    },
+  };
+}
+
 function isUuid(value: string): boolean {
   return UUID_RE.test(value);
 }
@@ -791,7 +577,7 @@ async function resolveStepsInProcess(params: {
   sessionKey?: string;
   sessionId?: string;
   runId?: string;
-}): Promise<SidecarToolCatalogResponse> {
+}): Promise<ToolCatalogResolution> {
   const internalsStartedAt = process.hrtime.bigint();
   const internals = await loadToolCatalogInternals();
   const internalsDurationSec = secondsSince(internalsStartedAt);
@@ -802,7 +588,7 @@ async function resolveStepsInProcess(params: {
     sessionKey: params.sessionKey,
     sessionId: params.sessionId,
     runId: params.runId,
-    config: params.api.config,
+    config: sanitizeToolCatalogConfig(toJsonRecord(params.api.config) ?? {}),
     // Keep the synced step catalog permissive so guardrail policy sees the full
     // internal tool surface when sender ownership is unknown in this hook context.
     senderIsOwner: true,
@@ -1097,44 +883,19 @@ export default function register(api: OpenClawPluginApi) {
     `agent-control: client_init duration_sec=${secondsSince(clientInitStartedAt)} timeout_ms=${clientTimeoutMs ?? "default"} server_url=${serverUrl}`,
   );
 
-  let sidecar: ToolSchemaSidecarClient | null = null;
-  let oneShotFallbackUsed = false;
-  const prewarmSidecar = async (trigger: "register" | "gateway_start"): Promise<void> => {
-    if (!sidecar) {
-      return;
-    }
-    const deduped = sidecar.isPrewarmInFlight();
-    const prewarmStartedAt = process.hrtime.bigint();
-    try {
-      await sidecar.prewarm();
-      api.logger.info(
-        `agent-control: sidecar prewarm trigger=${trigger} deduped=${deduped} duration_sec=${secondsSince(prewarmStartedAt)} openclaw_root=${sidecar.getOpenClawRoot()}`,
-      );
-      api.logger.info(
-        `agent-control: sidecar ready trigger=${trigger} prewarm_done=true`,
-      );
-    } catch (error) {
-      api.logger.warn(
-        `agent-control: sidecar prewarm trigger=${trigger} deduped=${deduped} failed=${describeError(error)}`,
-      );
-    }
-  };
+  let sidecar: JitiPrewarmSidecar | null = null;
   try {
-    const openClawRoot = resolveOpenClawRootDir();
-    sidecar = new ToolSchemaSidecarClient(openClawRoot, api.logger);
-    void prewarmSidecar("register");
-    process.once("beforeExit", () => {
-      sidecar?.stop("process_beforeExit");
-    });
-    process.once("exit", () => {
-      sidecar?.stop("process_exit");
-    });
+    const openClawRoot = getResolvedOpenClawRootDir();
+    sidecar = new JitiPrewarmSidecar(openClawRoot, SHARED_JITI_CACHE_DIR, api.logger);
+    api.logger.info(
+      `agent-control: jiti cache_dir=${SHARED_JITI_CACHE_DIR} openclaw_root=${openClawRoot}`,
+    );
   } catch (error) {
     api.logger.warn(`agent-control: sidecar disabled: ${describeError(error)}`);
   }
 
   api.on("gateway_start", async () => {
-    await prewarmSidecar("gateway_start");
+    await sidecar?.prewarm("gateway_start");
   });
   api.on("gateway_stop", async () => {
     sidecar?.stop("gateway_stop");
@@ -1278,83 +1039,36 @@ export default function register(api: OpenClawPluginApi) {
         `agent-control: before_tool_call entered agent=${sourceAgentId} tool=${event.toolName} args=${argsForLog}`,
       );
       if (sidecar?.isPrewarmInFlight()) {
+        const prewarmWaitStartedAt = process.hrtime.bigint();
         api.logger.info(
-          `agent-control: before_tool_call waiting_for_sidecar_prewarm=true agent=${sourceAgentId} tool=${event.toolName}`,
+          `agent-control: before_tool_call waiting_for_sidecar_prewarm=true agent=${sourceAgentId} tool=${event.toolName} cache_dir=${sidecar.getCacheDir()}`,
+        );
+        await sidecar.waitForPrewarmCompletion();
+        api.logger.info(
+          `agent-control: before_tool_call waited_for_sidecar_prewarm=true duration_sec=${secondsSince(prewarmWaitStartedAt)} agent=${sourceAgentId} tool=${event.toolName} terminal_state=${sidecar.getTerminalState()}`,
         );
       }
 
       try {
         try {
           const resolveStepsStartedAt = process.hrtime.bigint();
-          let resolveMode: "sidecar" | "cache" | "jiti_fallback_once" | "degraded_no_cache" =
-            "degraded_no_cache";
-          let sidecarError: string | null = null;
-          let nextSteps: AgentControlStep[] | null = null;
-
-          if (sidecar) {
-            try {
-              const safeConfig = toJsonRecord(api.config) ?? {};
-              const sidecarResult = await sidecar.resolveSteps({
-                sourceAgentId,
-                sessionKey: ctx.sessionKey,
-                sessionId: ctx.sessionId,
-                runId: ctx.runId,
-                config: safeConfig,
-              });
-              nextSteps = sidecarResult.steps;
-              resolveMode = "sidecar";
-              api.logger.info(
-                `agent-control: resolve_steps mode=sidecar duration_sec=${secondsSince(resolveStepsStartedAt)} agent=${sourceAgentId} tool=${event.toolName} internals_sec=${sidecarResult.internalsDurationSec} create_tools_sec=${sidecarResult.createToolsDurationSec} adapt_sec=${sidecarResult.adaptDurationSec} tools=${sidecarResult.toolsCount} steps=${sidecarResult.steps.length}`,
-              );
-            } catch (error) {
-              sidecarError = describeError(error);
-            }
-          } else {
-            sidecarError = "sidecar unavailable";
-          }
-
-          if (!nextSteps) {
-            if (state.steps.length > 0) {
-              nextSteps = state.steps;
-              resolveMode = "cache";
-              api.logger.warn(
-                `agent-control: resolve_steps mode=cache duration_sec=${secondsSince(resolveStepsStartedAt)} agent=${sourceAgentId} tool=${event.toolName} cached_steps=${state.steps.length} sidecar_error=${sidecarError ?? "unknown"}`,
-              );
-            } else if (!oneShotFallbackUsed) {
-              oneShotFallbackUsed = true;
-              try {
-                const fallbackResult = await resolveStepsInProcess({
-                  api,
-                  sourceAgentId,
-                  sessionKey: ctx.sessionKey,
-                  sessionId: ctx.sessionId,
-                  runId: ctx.runId,
-                });
-                nextSteps = fallbackResult.steps;
-                resolveMode = "jiti_fallback_once";
-                api.logger.warn(
-                  `agent-control: resolve_steps mode=jiti_fallback_once duration_sec=${secondsSince(resolveStepsStartedAt)} agent=${sourceAgentId} tool=${event.toolName} internals_sec=${fallbackResult.internalsDurationSec} create_tools_sec=${fallbackResult.createToolsDurationSec} adapt_sec=${fallbackResult.adaptDurationSec} tools=${fallbackResult.toolsCount} steps=${fallbackResult.steps.length} sidecar_error=${sidecarError ?? "unknown"}`,
-                );
-              } catch (fallbackError) {
-                sidecarError = `sidecar=${sidecarError ?? "unknown"} jiti=${describeError(fallbackError)}`;
-              }
-            }
-          }
-
-          if (!nextSteps) {
-            resolveMode = "degraded_no_cache";
-            api.logger.warn(
-              `agent-control: resolve_steps mode=degraded_no_cache duration_sec=${secondsSince(resolveStepsStartedAt)} agent=${sourceAgentId} tool=${event.toolName} one_shot_fallback_used=${oneShotFallbackUsed} reason=${sidecarError ?? "unknown"}`,
-            );
-          } else {
-            const nextStepsHash = hashSteps(nextSteps);
-            if (nextStepsHash !== state.stepsHash) {
-              state.steps = nextSteps;
-              state.stepsHash = nextStepsHash;
-            }
+          const resolvedSteps = await resolveStepsInProcess({
+            api,
+            sourceAgentId,
+            sessionKey: ctx.sessionKey,
+            sessionId: ctx.sessionId,
+            runId: ctx.runId,
+          });
+          const nextStepsHash = hashSteps(resolvedSteps.steps);
+          if (nextStepsHash !== state.stepsHash) {
+            state.steps = resolvedSteps.steps;
+            state.stepsHash = nextStepsHash;
           }
           api.logger.info(
-            `agent-control: before_tool_call phase=resolve_steps mode=${resolveMode} duration_sec=${secondsSince(resolveStepsStartedAt)} agent=${sourceAgentId} tool=${event.toolName} steps=${state.steps.length}`,
+            `agent-control: resolve_steps mode=in_process duration_sec=${secondsSince(resolveStepsStartedAt)} agent=${sourceAgentId} tool=${event.toolName} internals_sec=${resolvedSteps.internalsDurationSec} create_tools_sec=${resolvedSteps.createToolsDurationSec} adapt_sec=${resolvedSteps.adaptDurationSec} tools=${resolvedSteps.toolsCount} steps=${resolvedSteps.steps.length}`,
+          );
+          api.logger.info(
+            `agent-control: before_tool_call phase=resolve_steps mode=in_process duration_sec=${secondsSince(resolveStepsStartedAt)} agent=${sourceAgentId} tool=${event.toolName} steps=${state.steps.length}`,
           );
 
           if (state.steps.length > 0) {
@@ -1365,7 +1079,7 @@ export default function register(api: OpenClawPluginApi) {
             );
           } else {
             api.logger.info(
-              `agent-control: before_tool_call phase=sync_agent skipped=true reason=no_steps mode=degraded_no_cache agent=${sourceAgentId} tool=${event.toolName}`,
+              `agent-control: before_tool_call phase=sync_agent skipped=true reason=no_steps mode=in_process agent=${sourceAgentId} tool=${event.toolName}`,
             );
           }
         } catch (err) {
