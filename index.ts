@@ -94,8 +94,10 @@ type SessionMetadataCacheEntry = {
   data: SessionIdentitySnapshot;
 };
 
+const BOOT_WARMUP_AGENT_ID = "main";
 let toolCatalogInternalsPromise: Promise<ToolCatalogInternals> | null = null;
 let sessionStoreInternalsPromise: Promise<SessionStoreInternals> | null = null;
+let resolvedOpenClawRootDir: string | null = null;
 const sessionMetadataCache = new Map<string, SessionMetadataCacheEntry>();
 const SESSION_META_CACHE_TTL_MS = 2_000;
 const SESSION_META_CACHE_MAX = 512;
@@ -166,6 +168,13 @@ function resolveOpenClawRootDir(): string {
   return found;
 }
 
+function getResolvedOpenClawRootDir(): string {
+  if (!resolvedOpenClawRootDir) {
+    resolvedOpenClawRootDir = resolveOpenClawRootDir();
+  }
+  return resolvedOpenClawRootDir;
+}
+
 async function importOpenClawInternalModule(
   openClawRoot: string,
   candidates: string[],
@@ -199,7 +208,7 @@ async function loadToolCatalogInternals(): Promise<ToolCatalogInternals> {
   }
 
   toolCatalogInternalsPromise = (async () => {
-    const openClawRoot = resolveOpenClawRootDir();
+    const openClawRoot = getResolvedOpenClawRootDir();
     const [piToolsModule, adapterModule] = await Promise.all([
       importOpenClawInternalModule(openClawRoot, [
         "dist/agents/pi-tools.js",
@@ -235,7 +244,7 @@ async function loadSessionStoreInternals(): Promise<SessionStoreInternals> {
   }
 
   sessionStoreInternalsPromise = (async () => {
-    const openClawRoot = resolveOpenClawRootDir();
+    const openClawRoot = getResolvedOpenClawRootDir();
     const [configModule, sessionsModule] = await Promise.all([
       importOpenClawInternalModule(openClawRoot, [
         "dist/config/config.js",
@@ -304,6 +313,23 @@ function toJsonRecord(value: unknown): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+function sanitizeToolCatalogConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const pluginsRaw = config.plugins;
+  if (!isRecord(pluginsRaw)) {
+    return {
+      ...config,
+      plugins: { enabled: false },
+    };
+  }
+  return {
+    ...config,
+    plugins: {
+      ...pluginsRaw,
+      enabled: false,
+    },
+  };
 }
 
 function isUuid(value: string): boolean {
@@ -377,7 +403,7 @@ async function resolveStepsForContext(params: {
     sessionKey: params.sessionKey,
     sessionId: params.sessionId,
     runId: params.runId,
-    config: params.api.config,
+    config: sanitizeToolCatalogConfig(toJsonRecord(params.api.config) ?? {}),
     // Keep the synced step catalog permissive so guardrail policy sees the full
     // internal tool surface when sender ownership is unknown in this hook context.
     senderIsOwner: true,
@@ -671,6 +697,8 @@ export default function register(api: OpenClawPluginApi) {
   );
 
   const states = new Map<string, AgentState>();
+  let gatewayWarmupPromise: Promise<void> | null = null;
+  let gatewayWarmupStatus: "idle" | "running" | "done" | "failed" = "idle";
 
   const getOrCreateState = (sourceAgentId: string): AgentState => {
     const existing = states.get(sourceAgentId);
@@ -692,6 +720,39 @@ export default function register(api: OpenClawPluginApi) {
     };
     states.set(sourceAgentId, created);
     return created;
+  };
+
+  const ensureGatewayWarmup = (): Promise<void> => {
+    if (gatewayWarmupPromise) {
+      return gatewayWarmupPromise;
+    }
+
+    const warmupStartedAt = process.hrtime.bigint();
+    gatewayWarmupStatus = "running";
+    api.logger.info(
+      `agent-control: gateway_boot_warmup started agent=${BOOT_WARMUP_AGENT_ID}`,
+    );
+
+    // Warm the exact resolver path used during tool evaluation so the gateway
+    // process retains the expensive module graph in memory after startup.
+    gatewayWarmupPromise = resolveStepsForContext({
+      api,
+      sourceAgentId: BOOT_WARMUP_AGENT_ID,
+    })
+      .then((steps) => {
+        gatewayWarmupStatus = "done";
+        api.logger.info(
+          `agent-control: gateway_boot_warmup done duration_sec=${secondsSince(warmupStartedAt)} agent=${BOOT_WARMUP_AGENT_ID} steps=${steps.length}`,
+        );
+      })
+      .catch((err) => {
+        gatewayWarmupStatus = "failed";
+        api.logger.warn(
+          `agent-control: gateway_boot_warmup failed duration_sec=${secondsSince(warmupStartedAt)} agent=${BOOT_WARMUP_AGENT_ID} error=${String(err)}`,
+        );
+      });
+
+    return gatewayWarmupPromise;
   };
 
   const buildEvaluationContext = async (params: {
@@ -797,6 +858,10 @@ export default function register(api: OpenClawPluginApi) {
     }
   };
 
+  api.on("gateway_start", async () => {
+    await ensureGatewayWarmup();
+  });
+
   api.on(
     "before_tool_call",
     async (event, ctx) => {
@@ -809,6 +874,17 @@ export default function register(api: OpenClawPluginApi) {
       );
 
       try {
+        if (gatewayWarmupStatus === "running" && gatewayWarmupPromise) {
+          const warmupWaitStartedAt = process.hrtime.bigint();
+          api.logger.info(
+            `agent-control: before_tool_call waiting_for_gateway_boot_warmup=true agent=${sourceAgentId} tool=${event.toolName}`,
+          );
+          await gatewayWarmupPromise;
+          api.logger.info(
+            `agent-control: before_tool_call phase=wait_boot_warmup duration_sec=${secondsSince(warmupWaitStartedAt)} agent=${sourceAgentId} tool=${event.toolName} warmup_status=${gatewayWarmupStatus}`,
+          );
+        }
+
         try {
           const resolveStepsStartedAt = process.hrtime.bigint();
           const nextSteps = await resolveStepsForContext({
