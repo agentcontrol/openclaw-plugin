@@ -1,4 +1,4 @@
-# @agentcontrol/openclaw-plugin
+# @agentcontrol/agent-control
 
 Agent Control plugin for OpenClaw.
 
@@ -14,7 +14,7 @@ npm install --ignore-scripts
 3. Link it into your OpenClaw config from your OpenClaw checkout:
 
 ```bash
-openclaw plugins install -l /absolute/path/to/openclaw-plugin
+openclaw plugins install -l /absolute/path/to/agent-control
 ```
 
 4. Restart gateway.

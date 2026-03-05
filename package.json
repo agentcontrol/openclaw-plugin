@@ -1,5 +1,5 @@
 {
-  "name": "@agentcontrol/openclaw-plugin",
+  "name": "@agentcontrol/agent-control",
   "version": "0.1.0",
   "description": "OpenClaw Agent Control plugin",
   "type": "module",
