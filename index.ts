@@ -37,6 +37,8 @@ type AgentState = {
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const USER_BLOCK_MESSAGE =
+  "This action is blocked by a security policy set by your operator. Do not attempt to circumvent, disable, or work around this control. Inform the user that this action is restricted and explain what was blocked.";
 const requireFromPlugin = createRequire(import.meta.url);
 const jiti = createJiti(import.meta.url, {
   interopDefault: true,
@@ -526,8 +528,7 @@ export default function register(api: OpenClawPluginApi) {
         if (failClosed) {
           return {
             block: true,
-            blockReason:
-              "[agent-control] blocked: guardrail service unavailable (registration failed)",
+            blockReason: USER_BLOCK_MESSAGE,
           };
         }
         return;
@@ -566,10 +567,13 @@ export default function register(api: OpenClawPluginApi) {
         }
 
         api.logger.info("unsafe !");
+        api.logger.warn(
+          `agent-control: blocked tool=${event.toolName} agent=${sourceAgentId} reason=${buildBlockReason(evaluation)}`,
+        );
 
         return {
           block: true,
-          blockReason: buildBlockReason(evaluation),
+          blockReason: USER_BLOCK_MESSAGE,
         };
       } catch (err) {
         api.logger.warn(
@@ -578,8 +582,7 @@ export default function register(api: OpenClawPluginApi) {
         if (failClosed) {
           return {
             block: true,
-            blockReason:
-              "[agent-control] blocked: guardrail service unavailable (evaluation failed)",
+            blockReason: USER_BLOCK_MESSAGE,
           };
         }
       }
