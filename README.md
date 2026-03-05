@@ -57,25 +57,3 @@ openclaw config unset plugins.entries.agent-control.config.userAgent
 # Uninstall plugin link/install record from OpenClaw config
 openclaw plugins uninstall agent-control --force
 ```
-
-## Config
-
-Set plugin config under `plugins.entries.agent-control`:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "agent-control": {
-        "enabled": true,
-        "config": {
-          "serverUrl": "http://localhost:8000",
-          "apiKey": "<optional>",
-          "agentName": "openclaw-agent",
-          "failClosed": false
-        }
-      }
-    }
-  }
-}
-```
