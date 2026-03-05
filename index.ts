@@ -314,6 +314,10 @@ function trimToMax(value: string, maxLen: number): string {
   return value.length <= maxLen ? value : value.slice(0, maxLen);
 }
 
+function secondsSince(startedAt: bigint): string {
+  return (Number(process.hrtime.bigint() - startedAt) / 1_000_000_000).toFixed(3);
+}
+
 function hashSteps(steps: AgentControlStep[]): string {
   return createHash("sha256").update(JSON.stringify(steps)).digest("hex");
 }
@@ -362,7 +366,12 @@ async function resolveStepsForContext(params: {
   sessionId?: string;
   runId?: string;
 }): Promise<AgentControlStep[]> {
+  const resolveStartedAt = process.hrtime.bigint();
+  const internalsStartedAt = process.hrtime.bigint();
   const internals = await loadToolCatalogInternals();
+  const internalsDurationSec = secondsSince(internalsStartedAt);
+
+  const createToolsStartedAt = process.hrtime.bigint();
   const tools = internals.createOpenClawCodingTools({
     agentId: params.sourceAgentId,
     sessionKey: params.sessionKey,
@@ -373,8 +382,11 @@ async function resolveStepsForContext(params: {
     // internal tool surface when sender ownership is unknown in this hook context.
     senderIsOwner: true,
   });
+  const createToolsDurationSec = secondsSince(createToolsStartedAt);
+
+  const adaptStartedAt = process.hrtime.bigint();
   const toolDefinitions = internals.toToolDefinitions(tools);
-  return buildSteps(
+  const steps = buildSteps(
     toolDefinitions.map((tool) => ({
       name: tool.name,
       label: tool.label,
@@ -382,6 +394,13 @@ async function resolveStepsForContext(params: {
       parameters: tool.parameters,
     })),
   );
+  const adaptDurationSec = secondsSince(adaptStartedAt);
+
+  params.api.logger.info(
+    `agent-control: resolve_steps duration_sec=${secondsSince(resolveStartedAt)} agent=${params.sourceAgentId} internals_sec=${internalsDurationSec} create_tools_sec=${createToolsDurationSec} adapt_sec=${adaptDurationSec} tools=${tools.length} steps=${steps.length}`,
+  );
+
+  return steps;
 }
 
 function collectDenyControlNames(response: {
@@ -636,15 +655,20 @@ export default function register(api: OpenClawPluginApi) {
   const baseAgentName = asString(cfg.agentName) ?? "openclaw-agent";
   const configuredAgentVersion = asString(cfg.agentVersion);
   const pluginVersion = asString(api.version);
+  const clientTimeoutMs = asPositiveInt(cfg.timeoutMs);
 
+  const clientInitStartedAt = process.hrtime.bigint();
   const client = new AgentControlClient();
   client.init({
     agentName: baseAgentName,
     serverUrl,
     apiKey: asString(cfg.apiKey) ?? asString(process.env.AGENT_CONTROL_API_KEY),
-    timeoutMs: asPositiveInt(cfg.timeoutMs),
+    timeoutMs: clientTimeoutMs,
     userAgent: asString(cfg.userAgent) ?? "openclaw-agent-control-plugin/0.1",
   });
+  api.logger.info(
+    `agent-control: client_init duration_sec=${secondsSince(clientInitStartedAt)} timeout_ms=${clientTimeoutMs ?? "default"} server_url=${serverUrl}`,
+  );
 
   const states = new Map<string, AgentState>();
 
@@ -786,6 +810,7 @@ export default function register(api: OpenClawPluginApi) {
 
       try {
         try {
+          const resolveStepsStartedAt = process.hrtime.bigint();
           const nextSteps = await resolveStepsForContext({
             api,
             sourceAgentId,
@@ -798,7 +823,15 @@ export default function register(api: OpenClawPluginApi) {
             state.steps = nextSteps;
             state.stepsHash = nextStepsHash;
           }
+          api.logger.info(
+            `agent-control: before_tool_call phase=resolve_steps duration_sec=${secondsSince(resolveStepsStartedAt)} agent=${sourceAgentId} tool=${event.toolName} steps=${nextSteps.length}`,
+          );
+
+          const syncStartedAt = process.hrtime.bigint();
           await syncAgent(state);
+          api.logger.info(
+            `agent-control: before_tool_call phase=sync_agent duration_sec=${secondsSince(syncStartedAt)} agent=${sourceAgentId} tool=${event.toolName} step_count=${state.steps.length}`,
+          );
         } catch (err) {
           api.logger.warn(
             `agent-control: unable to sync agent=${sourceAgentId} before tool evaluation: ${String(err)}`,
@@ -813,6 +846,7 @@ export default function register(api: OpenClawPluginApi) {
         }
 
         try {
+          const contextBuildStartedAt = process.hrtime.bigint();
           const context = await buildEvaluationContext({
             sourceAgentId,
             state,
@@ -827,11 +861,15 @@ export default function register(api: OpenClawPluginApi) {
               toolCallId: ctx.toolCallId,
             },
           });
+          api.logger.info(
+            `agent-control: before_tool_call phase=build_context duration_sec=${secondsSince(contextBuildStartedAt)} agent=${sourceAgentId} tool=${event.toolName}`,
+          );
 
           api.logger.info(
             `agent-control: before_tool_call evaluated agent=${sourceAgentId} tool=${event.toolName} args=${argsForLog} context=${JSON.stringify(context, null, 2)}`,
           );
 
+          const evaluateStartedAt = process.hrtime.bigint();
           const evaluation = await client.evaluation.evaluate({
             body: {
               agentName: state.agentName,
@@ -844,6 +882,9 @@ export default function register(api: OpenClawPluginApi) {
               },
             },
           });
+          api.logger.info(
+            `agent-control: before_tool_call phase=evaluate duration_sec=${secondsSince(evaluateStartedAt)} agent=${sourceAgentId} tool=${event.toolName} safe=${evaluation.isSafe}`,
+          );
 
           if (evaluation.isSafe) {
             api.logger.info("safe !");
@@ -871,10 +912,8 @@ export default function register(api: OpenClawPluginApi) {
           }
         }
       } finally {
-        const durationSeconds =
-          Number(process.hrtime.bigint() - beforeToolCallStartedAt) / 1_000_000_000;
         api.logger.info(
-          `agent-control: before_tool_call duration_sec=${durationSeconds.toFixed(3)} agent=${sourceAgentId} tool=${event.toolName}`,
+          `agent-control: before_tool_call duration_sec=${secondsSince(beforeToolCallStartedAt)} agent=${sourceAgentId} tool=${event.toolName}`,
         );
       }
     },
