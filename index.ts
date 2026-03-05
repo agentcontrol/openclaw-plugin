@@ -54,6 +54,13 @@ const jiti = createJiti(import.meta.url, {
   interopDefault: true,
   extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".json"],
 });
+const TSX_IMPORT_SPECIFIER = (() => {
+  try {
+    return pathToFileURL(requireFromPlugin.resolve("tsx")).href;
+  } catch {
+    return "tsx";
+  }
+})();
 
 type ToolCatalogInternals = {
   createOpenClawCodingTools: (params: {
@@ -293,8 +300,10 @@ class ToolSchemaSidecarClient {
         throw new Error("agent-control: sidecar startup cancelled because client is stopped");
       }
 
-      const child = spawn(process.execPath, ["--import", "tsx", sidecarPath], {
+      const sidecarCwd = path.dirname(sidecarPath);
+      const child = spawn(process.execPath, ["--import", TSX_IMPORT_SPECIFIER, sidecarPath], {
         stdio: ["pipe", "pipe", "pipe"],
+        cwd: sidecarCwd,
         env: {
           ...process.env,
         },
