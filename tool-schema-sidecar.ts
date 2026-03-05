@@ -83,6 +83,23 @@ function toJsonRecord(value: unknown): Record<string, unknown> | undefined {
   }
 }
 
+function sanitizeToolCatalogConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const pluginsRaw = config.plugins;
+  if (!isRecord(pluginsRaw)) {
+    return {
+      ...config,
+      plugins: { enabled: false },
+    };
+  }
+  return {
+    ...config,
+    plugins: {
+      ...pluginsRaw,
+      enabled: false,
+    },
+  };
+}
+
 function describeError(error: unknown): string {
   if (error instanceof Error) {
     return error.message || String(error);
@@ -219,7 +236,7 @@ async function handleResolveSteps(params: Record<string, unknown>): Promise<Reco
     sessionKey: asString(payload.sessionKey),
     sessionId: asString(payload.sessionId),
     runId: asString(payload.runId),
-    config: toJsonRecord(payload.config) ?? {},
+    config: sanitizeToolCatalogConfig(toJsonRecord(payload.config) ?? {}),
     senderIsOwner: true,
   });
   const createToolsDurationSec = secondsSince(createToolsStartedAt);
