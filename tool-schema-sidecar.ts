@@ -306,24 +306,36 @@ function handleInputLine(line: string) {
     return;
   }
 
-  void handleRequest(request)
-    .then((result) => {
-      writeResponse({
-        id: request.id,
-        ok: true,
-        result,
-      });
-    })
-    .catch((error) => {
-      writeResponse({
-        id: request.id,
-        ok: false,
-        error: describeError(error),
-      });
+  queueRequest(request);
+}
+
+async function runRequest(request: SidecarRequest): Promise<void> {
+  try {
+    const result = await handleRequest(request);
+    writeResponse({
+      id: request.id,
+      ok: true,
+      result,
     });
+  } catch (error) {
+    writeResponse({
+      id: request.id,
+      ok: false,
+      error: describeError(error),
+    });
+  }
 }
 
 process.stdin.setEncoding("utf8");
+
+let requestChain: Promise<void> = Promise.resolve();
+function queueRequest(request: SidecarRequest): void {
+  const next = requestChain.then(
+    () => runRequest(request),
+    () => runRequest(request),
+  );
+  requestChain = next;
+}
 
 let inputBuffer = "";
 process.stdin.on("data", (chunk: string | Buffer) => {
