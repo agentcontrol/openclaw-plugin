@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { AgentControlClient } from "agent-control";
 import { createJiti } from "jiti";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
@@ -94,7 +94,22 @@ type SessionMetadataCacheEntry = {
   data: SessionIdentitySnapshot;
 };
 
+type LoggerLike = Pick<OpenClawPluginApi["logger"], "info" | "warn">;
+
+type ToolCatalogBundleBuildInfo = {
+  bundlePath: string;
+  cacheDir: string;
+  cacheKey: string;
+  openClawRoot: string;
+  wrapperEntryPath: string;
+  metaPath: string;
+};
+
 const BOOT_WARMUP_AGENT_ID = "main";
+const PLUGIN_ROOT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const TOOL_CATALOG_BUNDLE_DIRNAME = path.join("dist", "agent-control-generated", "tool-catalog");
+const TOOL_CATALOG_BUNDLE_FILE = "index.mjs";
+const TOOL_CATALOG_WRAPPER_FILE = "entry.ts";
 let toolCatalogInternalsPromise: Promise<ToolCatalogInternals> | null = null;
 let sessionStoreInternalsPromise: Promise<SessionStoreInternals> | null = null;
 let resolvedOpenClawRootDir: string | null = null;
@@ -103,17 +118,41 @@ const SESSION_META_CACHE_TTL_MS = 2_000;
 const SESSION_META_CACHE_MAX = 512;
 
 function readPackageName(packageJsonPath: string): string | undefined {
+  return readPackageField(packageJsonPath, "name");
+}
+
+function readPackageVersion(packageJsonPath: string): string | undefined {
+  return readPackageField(packageJsonPath, "version");
+}
+
+function readPackageField(packageJsonPath: string, field: "name" | "version"): string | undefined {
   try {
     const raw = fs.readFileSync(packageJsonPath, "utf8");
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object") {
       return undefined;
     }
-    const name = (parsed as { name?: unknown }).name;
-    return typeof name === "string" ? name : undefined;
+    const value = (parsed as { name?: unknown; version?: unknown })[field];
+    return typeof value === "string" ? value : undefined;
   } catch {
     return undefined;
   }
+}
+
+function safeStatMtimeMs(filePath: string): number | null {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRelativeImportPath(fromDir: string, toFile: string): string {
+  const relativePath = path.relative(fromDir, toFile).replaceAll(path.sep, "/");
+  if (relativePath.startsWith(".")) {
+    return relativePath;
+  }
+  return `./${relativePath}`;
 }
 
 function findOpenClawRootFrom(startPath: string | undefined): string | undefined {
@@ -175,6 +214,197 @@ function getResolvedOpenClawRootDir(): string {
   return resolvedOpenClawRootDir;
 }
 
+function resolveToolCatalogBundleBuildInfo(openClawRoot: string): ToolCatalogBundleBuildInfo {
+  const piToolsSource = path.join(openClawRoot, "src/agents/pi-tools.ts");
+  const adapterSource = path.join(openClawRoot, "src/agents/pi-tool-definition-adapter.ts");
+  const cacheKeySeed = JSON.stringify({
+    openClawRoot,
+    openClawVersion: readPackageVersion(path.join(openClawRoot, "package.json")) ?? "unknown",
+    pluginVersion: readPackageVersion(path.join(PLUGIN_ROOT_DIR, "package.json")) ?? "unknown",
+    nodeMajor: process.versions.node.split(".")[0] ?? "unknown",
+    piToolsMtimeMs: safeStatMtimeMs(piToolsSource),
+    adapterMtimeMs: safeStatMtimeMs(adapterSource),
+  });
+  const cacheKey = createHash("sha256").update(cacheKeySeed).digest("hex").slice(0, 16);
+  const cacheDir = path.join(openClawRoot, TOOL_CATALOG_BUNDLE_DIRNAME, cacheKey);
+  return {
+    bundlePath: path.join(cacheDir, TOOL_CATALOG_BUNDLE_FILE),
+    cacheDir,
+    cacheKey,
+    openClawRoot,
+    wrapperEntryPath: path.join(cacheDir, TOOL_CATALOG_WRAPPER_FILE),
+    metaPath: path.join(cacheDir, "meta.json"),
+  };
+}
+
+function hasToolCatalogBundleSources(openClawRoot: string): boolean {
+  return (
+    fs.existsSync(path.join(openClawRoot, "src/agents/pi-tools.ts")) &&
+    fs.existsSync(path.join(openClawRoot, "src/agents/pi-tool-definition-adapter.ts"))
+  );
+}
+
+async function importToolCatalogBundleModule(
+  logger: LoggerLike,
+  buildInfo: ToolCatalogBundleBuildInfo,
+): Promise<Record<string, unknown>> {
+  const importStartedAt = process.hrtime.bigint();
+  const bundleMtime = safeStatMtimeMs(buildInfo.bundlePath) ?? Date.now();
+  const bundleUrl = `${pathToFileURL(buildInfo.bundlePath).href}?mtime=${bundleMtime}`;
+  const imported = (await import(bundleUrl)) as Record<string, unknown>;
+  logger.info(
+    `agent-control: bundle_import_done duration_sec=${secondsSince(importStartedAt)} cache_key=${buildInfo.cacheKey} bundle_path=${buildInfo.bundlePath}`,
+  );
+  return imported;
+}
+
+function resolveToolCatalogInternalsFromModules(params: {
+  adapterModule: Record<string, unknown>;
+  piToolsModule: Record<string, unknown>;
+}): ToolCatalogInternals {
+  const createOpenClawCodingTools = params.piToolsModule.createOpenClawCodingTools;
+  const toToolDefinitions = params.adapterModule.toToolDefinitions;
+  if (typeof createOpenClawCodingTools !== "function") {
+    throw new Error("agent-control: openclaw internal createOpenClawCodingTools is unavailable");
+  }
+  if (typeof toToolDefinitions !== "function") {
+    throw new Error("agent-control: openclaw internal toToolDefinitions is unavailable");
+  }
+
+  return {
+    createOpenClawCodingTools: createOpenClawCodingTools as ToolCatalogInternals["createOpenClawCodingTools"],
+    toToolDefinitions: toToolDefinitions as ToolCatalogInternals["toToolDefinitions"],
+  };
+}
+
+async function ensureToolCatalogBundle(
+  logger: LoggerLike,
+  buildInfo: ToolCatalogBundleBuildInfo,
+): Promise<void> {
+  if (fs.existsSync(buildInfo.bundlePath)) {
+    logger.info(
+      `agent-control: bundle_cache_hit cache_key=${buildInfo.cacheKey} bundle_path=${buildInfo.bundlePath}`,
+    );
+    return;
+  }
+
+  const esbuildStartedAt = process.hrtime.bigint();
+  logger.info(
+    `agent-control: bundle_build_started cache_key=${buildInfo.cacheKey} openclaw_root=${buildInfo.openClawRoot}`,
+  );
+
+  let esbuild: {
+    build: (options: Record<string, unknown>) => Promise<unknown>;
+  };
+  try {
+    esbuild = (await import("esbuild")) as {
+      build: (options: Record<string, unknown>) => Promise<unknown>;
+    };
+  } catch (err) {
+    throw new Error(`agent-control: esbuild is unavailable: ${String(err)}`);
+  }
+
+  fs.mkdirSync(buildInfo.cacheDir, { recursive: true });
+  const piToolsSource = path.join(buildInfo.openClawRoot, "src/agents/pi-tools.ts");
+  const adapterSource = path.join(buildInfo.openClawRoot, "src/agents/pi-tool-definition-adapter.ts");
+  const wrapperContents = [
+    `export { createOpenClawCodingTools } from ${JSON.stringify(normalizeRelativeImportPath(buildInfo.cacheDir, piToolsSource))};`,
+    `export { toToolDefinitions } from ${JSON.stringify(normalizeRelativeImportPath(buildInfo.cacheDir, adapterSource))};`,
+    "",
+  ].join("\n");
+  fs.writeFileSync(buildInfo.wrapperEntryPath, wrapperContents, "utf8");
+
+  const tsconfigPath = path.join(buildInfo.openClawRoot, "tsconfig.json");
+  try {
+    await esbuild.build({
+      absWorkingDir: buildInfo.openClawRoot,
+      bundle: true,
+      entryPoints: [buildInfo.wrapperEntryPath],
+      format: "esm",
+      logLevel: "silent",
+      outfile: buildInfo.bundlePath,
+      packages: "external",
+      platform: "node",
+      target: [`node${process.versions.node}`],
+      tsconfig: fs.existsSync(tsconfigPath) ? tsconfigPath : undefined,
+      write: true,
+    });
+  } catch (err) {
+    fs.rmSync(buildInfo.cacheDir, { force: true, recursive: true });
+    throw err;
+  }
+
+  fs.writeFileSync(
+    buildInfo.metaPath,
+    `${JSON.stringify(
+      {
+        builtAt: new Date().toISOString(),
+        cacheKey: buildInfo.cacheKey,
+        bundlePath: buildInfo.bundlePath,
+        openClawRoot: buildInfo.openClawRoot,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  logger.info(
+    `agent-control: bundle_build_done duration_sec=${secondsSince(esbuildStartedAt)} cache_key=${buildInfo.cacheKey} bundle_path=${buildInfo.bundlePath}`,
+  );
+}
+
+async function loadToolCatalogInternalsFromGeneratedBundle(
+  logger: LoggerLike,
+  openClawRoot: string,
+): Promise<ToolCatalogInternals | null> {
+  if (!hasToolCatalogBundleSources(openClawRoot)) {
+    return null;
+  }
+
+  const buildInfo = resolveToolCatalogBundleBuildInfo(openClawRoot);
+  const hadBundle = fs.existsSync(buildInfo.bundlePath);
+  try {
+    await ensureToolCatalogBundle(logger, buildInfo);
+    const bundledModule = await importToolCatalogBundleModule(logger, buildInfo);
+    return resolveToolCatalogInternalsFromModules({
+      adapterModule: bundledModule,
+      piToolsModule: bundledModule,
+    });
+  } catch (err) {
+    if (hadBundle) {
+      logger.warn(
+        `agent-control: bundle_import_failed cache_key=${buildInfo.cacheKey} bundle_path=${buildInfo.bundlePath} error=${String(err)}`,
+      );
+      fs.rmSync(buildInfo.cacheDir, { force: true, recursive: true });
+      await ensureToolCatalogBundle(logger, buildInfo);
+      const rebuiltModule = await importToolCatalogBundleModule(logger, buildInfo);
+      return resolveToolCatalogInternalsFromModules({
+        adapterModule: rebuiltModule,
+        piToolsModule: rebuiltModule,
+      });
+    }
+    throw err;
+  }
+}
+
+async function tryImportOpenClawInternalModule(
+  openClawRoot: string,
+  candidates: string[],
+): Promise<Record<string, unknown> | null> {
+  for (const relativePath of candidates) {
+    const absolutePath = path.join(openClawRoot, relativePath);
+    if (!fs.existsSync(absolutePath)) {
+      continue;
+    }
+    try {
+      return (await import(pathToFileURL(absolutePath).href)) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function importOpenClawInternalModule(
   openClawRoot: string,
   candidates: string[],
@@ -202,37 +432,55 @@ async function importOpenClawInternalModule(
   );
 }
 
-async function loadToolCatalogInternals(): Promise<ToolCatalogInternals> {
+async function loadToolCatalogInternals(logger: LoggerLike): Promise<ToolCatalogInternals> {
   if (toolCatalogInternalsPromise) {
     return toolCatalogInternalsPromise;
   }
 
   toolCatalogInternalsPromise = (async () => {
     const openClawRoot = getResolvedOpenClawRootDir();
-    const [piToolsModule, adapterModule] = await Promise.all([
-      importOpenClawInternalModule(openClawRoot, [
+    const [distPiToolsModule, distAdapterModule] = await Promise.all([
+      tryImportOpenClawInternalModule(openClawRoot, [
         "dist/agents/pi-tools.js",
-        "src/agents/pi-tools.ts",
+        "dist/agents/pi-tools.mjs",
       ]),
-      importOpenClawInternalModule(openClawRoot, [
+      tryImportOpenClawInternalModule(openClawRoot, [
         "dist/agents/pi-tool-definition-adapter.js",
-        "src/agents/pi-tool-definition-adapter.ts",
+        "dist/agents/pi-tool-definition-adapter.mjs",
       ]),
     ]);
-
-    const createOpenClawCodingTools = piToolsModule.createOpenClawCodingTools;
-    const toToolDefinitions = adapterModule.toToolDefinitions;
-    if (typeof createOpenClawCodingTools !== "function") {
-      throw new Error("agent-control: openclaw internal createOpenClawCodingTools is unavailable");
-    }
-    if (typeof toToolDefinitions !== "function") {
-      throw new Error("agent-control: openclaw internal toToolDefinitions is unavailable");
+    if (distPiToolsModule && distAdapterModule) {
+      logger.info(`agent-control: tool_catalog_internals source=dist openclaw_root=${openClawRoot}`);
+      return resolveToolCatalogInternalsFromModules({
+        adapterModule: distAdapterModule,
+        piToolsModule: distPiToolsModule,
+      });
     }
 
-    return {
-      createOpenClawCodingTools: createOpenClawCodingTools as ToolCatalogInternals["createOpenClawCodingTools"],
-      toToolDefinitions: toToolDefinitions as ToolCatalogInternals["toToolDefinitions"],
-    };
+    try {
+      const bundledInternals = await loadToolCatalogInternalsFromGeneratedBundle(logger, openClawRoot);
+      if (bundledInternals) {
+        logger.info(
+          `agent-control: tool_catalog_internals source=generated_bundle openclaw_root=${openClawRoot}`,
+        );
+        return bundledInternals;
+      }
+    } catch (err) {
+      logger.warn(
+        `agent-control: bundle_fallback=jiti openclaw_root=${openClawRoot} error=${String(err)}`,
+      );
+    }
+
+    logger.info(`agent-control: tool_catalog_internals source=jiti openclaw_root=${openClawRoot}`);
+    const [piToolsModule, adapterModule] = await Promise.all([
+      importOpenClawInternalModule(openClawRoot, ["src/agents/pi-tools.ts"]),
+      importOpenClawInternalModule(openClawRoot, ["src/agents/pi-tool-definition-adapter.ts"]),
+    ]);
+
+    return resolveToolCatalogInternalsFromModules({
+      adapterModule,
+      piToolsModule,
+    });
   })();
 
   return toolCatalogInternalsPromise;
@@ -394,7 +642,7 @@ async function resolveStepsForContext(params: {
 }): Promise<AgentControlStep[]> {
   const resolveStartedAt = process.hrtime.bigint();
   const internalsStartedAt = process.hrtime.bigint();
-  const internals = await loadToolCatalogInternals();
+  const internals = await loadToolCatalogInternals(params.api.logger);
   const internalsDurationSec = secondsSince(internalsStartedAt);
 
   const createToolsStartedAt = process.hrtime.bigint();

@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "agent-control": "^1.0.1",
+    "esbuild": "^0.27.3",
     "jiti": "^2.6.1"
   },
   "devDependencies": {
