@@ -12,7 +12,7 @@ Agent Control plugin for OpenClaw.
 2. Install plugin deps in this repo:
 
 ```bash
-npm install --ignore-scripts
+npm install
 ```
 
 3. Link it into your OpenClaw config from your OpenClaw checkout:
