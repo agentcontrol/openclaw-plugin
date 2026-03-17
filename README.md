@@ -1,30 +1,11 @@
 # OpenClaw plugin for Agent Control
 
-<table align="center">
-  <tr>
-    <td align="center" valign="middle">
-      <img
-        src="https://raw.githubusercontent.com/agentcontrol/agent-control/refs/heads/main/docs/images/AgentControl-logo-light.svg#gh-light-mode-only"
-        alt="Agent Control Logo (light)"
-        width="120"
-      />
-      <img
-        src="https://raw.githubusercontent.com/agentcontrol/agent-control/main/docs/images/AgentControl-logo-dark.svg#gh-dark-mode-only"
-        alt="Agent Control Logo (dark)"
-        width="120"
-      />
-    </td>
-    <td align="center" valign="middle">
-      <h1>+</h1>
-    </td>
-    <td align="center" valign="middle">
-      <picture>
-        <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text-dark.svg">
-        <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text.svg" alt="OpenClaw" width="500">
-      </picture>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="assets/cat-plus-lobster-light.svg">
+    <img src="assets/cat-plus-lobster-dark.svg" alt="Agent Control cat plus OpenClaw lobster" width="380">
+  </picture>
+</p>
 
 > [!WARNING]
 > Experimental plugin: this  may break across OpenClaw updates. Use in non-production or pinned environments.
