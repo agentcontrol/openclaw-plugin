@@ -20,6 +20,7 @@
   "files": [
     "index.ts",
     "src",
+    "assets",
     "openclaw.plugin.json",
     "README.md",
     "LICENSE"
