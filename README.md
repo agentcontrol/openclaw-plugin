@@ -1,4 +1,4 @@
-# @agentcontrol/agent-control
+# agent-control-openclaw-plugin
 
 Agent Control plugin for OpenClaw.
 
@@ -6,7 +6,17 @@ Agent Control plugin for OpenClaw.
 > Experimental plugin: this project is currently a hacky integration and may
 > break across OpenClaw updates. Use in non-production or pinned environments.
 
-## Local dev install (no publish)
+## Install from npm
+
+Install the published plugin directly into OpenClaw:
+
+```bash
+openclaw plugins install agent-control-openclaw-plugin
+```
+
+Then restart the gateway.
+
+## Local dev install
 
 1. Clone this repo anywhere on disk.
 2. Install plugin deps in this repo:

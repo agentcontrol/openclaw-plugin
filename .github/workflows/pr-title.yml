@@ -1,0 +1,48 @@
+name: PR Title
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-title-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  conventional-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          title = os.environ["PR_TITLE"]
+          pattern = re.compile(
+              r"^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]+\))?(!)?: .+"
+          )
+
+          if pattern.match(title):
+              print("PR title is a valid conventional commit title.")
+              raise SystemExit(0)
+
+          print(f"Invalid PR title: {title}", file=sys.stderr)
+          print("Expected format: type(scope): description", file=sys.stderr)
+          print(
+              "Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test",
+              file=sys.stderr,
+          )
+          raise SystemExit(1)
+          PY
