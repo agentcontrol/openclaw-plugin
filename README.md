@@ -1,10 +1,21 @@
-# agent-control-openclaw-plugin
+# OpenClaw plugin for Agent Control
 
-Agent Control plugin for OpenClaw.
+<p align="center">
+  <img
+    src="docs/images/AgentControl-logo-light.svg#gh-light-mode-only"
+    alt="Agent Control Logo (light)"
+    width="120"
+  />
+  <img
+    src="docs/images/AgentControl-logo-dark.svg#gh-dark-mode-only"
+    alt="Agent Control Logo (dark)"
+    width="120"
+  />
+  + 
+</p>
 
 > [!WARNING]
-> Experimental plugin: this project is currently a hacky integration and may
-> break across OpenClaw updates. Use in non-production or pinned environments.
+> Experimental plugin: this  may break across OpenClaw updates. Use in non-production or pinned environments.
 
 ## Install from npm
 
