@@ -3,7 +3,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: light)" srcset="assets/cat-plus-lobster-light.svg">
-    <img src="assets/cat-plus-lobster-dark.svg" alt="Agent Control cat plus OpenClaw lobster" width="380">
+    <img src="assets/cat-plus-lobster-dark.svg" alt="Agent Control cat plus OpenClaw lobster" width="430">
   </picture>
 </p>
 
