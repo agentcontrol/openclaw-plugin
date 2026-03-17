@@ -1,5 +1,5 @@
 {
-  "name": "@agentcontrol/agent-control",
+  "name": "agent-control-openclaw-plugin",
   "version": "0.1.0",
   "description": "OpenClaw Agent Control plugin",
   "keywords": [
@@ -24,9 +24,6 @@
     "README.md",
     "LICENSE"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
   "type": "module",
   "scripts": {
     "lint": "oxlint .",

@@ -1,4 +1,4 @@
-# @agentcontrol/agent-control
+# agent-control-openclaw-plugin
 
 Agent Control plugin for OpenClaw.
 
@@ -11,7 +11,7 @@ Agent Control plugin for OpenClaw.
 Install the published plugin directly into OpenClaw:
 
 ```bash
-openclaw plugins install @agentcontrol/agent-control
+openclaw plugins install agent-control-openclaw-plugin
 ```
 
 Then restart the gateway.
@@ -32,39 +32,6 @@ openclaw plugins install -l /absolute/path/to/openclaw-plugin
 ```
 
 4. Restart gateway.
-
-## Publish a release
-
-1. Configure npm trusted publishing once for this repo:
-
-In the npm package settings, add a GitHub Actions trusted publisher for the
-`agentcontrol/openclaw-plugin` repository and the
-`.github/workflows/release.yml` workflow file.
-
-2. Merge your release changes to `main`, then bump the package version locally:
-
-```bash
-npm version patch
-```
-
-3. Push `main` and the version tag:
-
-```bash
-git push origin main --follow-tags
-```
-
-GitHub Actions will run `.github/workflows/release.yml`, verify the tag matches
-`package.json`, lint the package, run `npm pack --dry-run`, and publish to npm
-with provenance.
-
-## Manual release checks
-
-Before pushing a release tag, you can run the publish checks locally:
-
-```bash
-npm pack --dry-run
-npm publish --dry-run
-```
 
 ## OpenClaw commands
 
