@@ -1,0 +1,35 @@
+name: PR Title
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-title-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  conventional-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [[ "$PR_TITLE" =~ ^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]+\))?(!)?:\ .+ ]]; then
+            echo "PR title is a valid conventional commit title."
+            exit 0
+          fi
+
+          echo "Invalid PR title: $PR_TITLE" >&2
+          echo "Expected format: type(scope): description" >&2
+          echo "Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test" >&2
+          exit 1
