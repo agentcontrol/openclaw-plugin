@@ -1,17 +1,15 @@
 # OpenClaw plugin for Agent Control
 
 <p align="center">
-  <img
-    src="https://raw.githubusercontent.com/agentcontrol/agent-control/refs/heads/main/docs/images/AgentControl-logo-light.svg#gh-light-mode-only"
-    alt="Agent Control Logo (light)"
-    width="120"
-  />
-  <img
-    src="https://raw.githubusercontent.com/agentcontrol/agent-control/refs/heads/main/docs/images/AgentControl-logo-dark.svg#gh-dark-mode-only"
-    alt="Agent Control Logo (dark)"
-    width="120"
-  />
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text-dark.svg">
+    <img src="https://raw.githubusercontent.com/agentcontrol/agent-control/refs/heads/main/docs/images/AgentControl-logo-light.svg" alt="Leon The Controller" width="120">
+  </picture>
   + 
+        <picture>
+        <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text-dark.svg">
+        <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text.svg" alt="OpenClaw" width="500">
+    </picture>
 </p>
 
 > [!WARNING]
