@@ -2,6 +2,31 @@
   "name": "@agentcontrol/agent-control",
   "version": "0.1.0",
   "description": "OpenClaw Agent Control plugin",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "agent-control",
+    "plugin",
+    "security"
+  ],
+  "homepage": "https://github.com/agentcontrol/openclaw-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/agentcontrol/openclaw-plugin/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentcontrol/openclaw-plugin.git"
+  },
+  "files": [
+    "index.ts",
+    "src",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "scripts": {
     "lint": "oxlint .",
