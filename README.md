@@ -1,10 +1,16 @@
-# agent-control-openclaw-plugin
+# OpenClaw plugin for Agent Control
 
-Agent Control plugin for OpenClaw.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="assets/cat-plus-lobster-light.svg">
+    <img src="assets/cat-plus-lobster-dark.svg" alt="Agent Control cat plus OpenClaw lobster" width="430">
+  </picture>
+</p>
+
+This plugin integrates OpenClaw with [Agent Control](https://github.com/agentcontrol/agent-control), a security and policy layer for agent tool use. It registers OpenClaw tools with Agent Control and can block unsafe tool invocations before they execute.
 
 > [!WARNING]
-> Experimental plugin: this project is currently a hacky integration and may
-> break across OpenClaw updates. Use in non-production or pinned environments.
+> Experimental plugin: this  may break across OpenClaw updates. Use in non-production or pinned environments.
 
 ## Install from npm
 
