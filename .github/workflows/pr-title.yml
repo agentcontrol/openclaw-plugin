@@ -24,12 +24,25 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          if [[ "$PR_TITLE" =~ ^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]+\))?(!)?:\ .+ ]]; then
-            echo "PR title is a valid conventional commit title."
-            exit 0
-          fi
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
 
-          echo "Invalid PR title: $PR_TITLE" >&2
-          echo "Expected format: type(scope): description" >&2
-          echo "Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test" >&2
-          exit 1
+          title = os.environ["PR_TITLE"]
+          pattern = re.compile(
+              r"^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]+\))?(!)?: .+"
+          )
+
+          if pattern.match(title):
+              print("PR title is a valid conventional commit title.")
+              raise SystemExit(0)
+
+          print(f"Invalid PR title: {title}", file=sys.stderr)
+          print("Expected format: type(scope): description", file=sys.stderr)
+          print(
+              "Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test",
+              file=sys.stderr,
+          )
+          raise SystemExit(1)
+          PY
