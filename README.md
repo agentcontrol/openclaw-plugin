@@ -7,6 +7,8 @@
   </picture>
 </p>
 
+This plugin integrates OpenClaw with [Agent Control](https://github.com/agentcontrol/agent-control), a security and policy layer for agent tool use. It registers OpenClaw tools with Agent Control and can block unsafe tool invocations before they execute.
+
 > [!WARNING]
 > Experimental plugin: this  may break across OpenClaw updates. Use in non-production or pinned environments.
 
