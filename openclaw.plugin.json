@@ -1,5 +1,5 @@
 {
-  "id": "agent-control",
+  "id": "agent-control-openclaw-plugin",
   "name": "Agent Control",
   "description": "Registers OpenClaw tools with Agent Control and blocks unsafe tool invocations.",
   "configSchema": {
