@@ -13,9 +13,7 @@ This plugin integrates OpenClaw with [Agent Control](https://github.com/agentcon
 ## Why use Agent Control with OpenClaw?
 
 - Enforce policy before tool execution, so unsafe or disallowed actions can be blocked before they run.
-- Keep Agent Control synced with OpenClaw's actual tool surface, so policy decisions are evaluated against the tools your agent can really call.
 - Carry session and channel context into evaluations, which helps policies reason about where a request came from and how the agent is being used.
-- Run fail-closed when needed, so OpenClaw can block tool invocations if Agent Control is unavailable instead of silently allowing them.
 
 > [!WARNING]
 > Experimental plugin: this  may break across OpenClaw updates. Use in non-production or pinned environments.
