@@ -67,7 +67,7 @@ export default function register(api: OpenClawPluginApi) {
   const serverUrl = asString(cfg.serverUrl) ?? asString(process.env.AGENT_CONTROL_SERVER_URL);
   if (!serverUrl) {
     api.logger.warn(
-      "agent-control: disabled because serverUrl is not configured (plugins.entries.agent-control.serverUrl)",
+      "agent-control: disabled because serverUrl is not configured (plugins.entries.agent-control-openclaw-plugin.config.serverUrl)",
     );
     return;
   }
