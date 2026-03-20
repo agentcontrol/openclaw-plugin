@@ -1,5 +1,10 @@
 # OpenClaw plugin for Agent Control
 
+[![npm version](https://img.shields.io/npm/v/agent-control-openclaw-plugin?logo=npm)](https://www.npmjs.com/package/agent-control-openclaw-plugin)
+[![Node >=24](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](https://github.com/agentcontrol/openclaw-plugin/blob/main/package.json)
+[![CI](https://github.com/agentcontrol/openclaw-plugin/actions/workflows/lint.yml/badge.svg)](https://github.com/agentcontrol/openclaw-plugin/actions/workflows/lint.yml)
+[![codecov](https://codecov.io/gh/agentcontrol/openclaw-plugin/graph/badge.svg?branch=main)](https://app.codecov.io/gh/agentcontrol/openclaw-plugin)
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/cat-plus-lobster-dark.svg">
