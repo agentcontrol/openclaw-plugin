@@ -66,12 +66,14 @@ openclaw config set plugins.entries.agent-control-openclaw-plugin.config.timeout
 openclaw config set plugins.entries.agent-control-openclaw-plugin.config.failClosed false --strict-json
 
 # Optional settings
+openclaw config set plugins.entries.agent-control-openclaw-plugin.config.debug true --strict-json
 openclaw config set plugins.entries.agent-control-openclaw-plugin.config.agentId "00000000-0000-4000-8000-000000000000"
 openclaw config set plugins.entries.agent-control-openclaw-plugin.config.agentVersion "2026.3.3"
 openclaw config set plugins.entries.agent-control-openclaw-plugin.config.userAgent "agent-control-plugin/0.1"
 
 # Remove optional keys
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.apiKey
+openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.debug
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.agentId
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.agentVersion
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.userAgent
@@ -79,3 +81,5 @@ openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.userA
 # Uninstall plugin link/install record from OpenClaw config
 openclaw plugins uninstall agent-control-openclaw-plugin --force
 ```
+
+By default the plugin stays quiet and only emits warnings, errors, and tool block events. Set `config.debug` to `true` when you want verbose startup, sync, and evaluation diagnostics.

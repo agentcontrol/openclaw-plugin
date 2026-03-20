@@ -10,6 +10,7 @@ export type AgentControlPluginConfig = {
   timeoutMs?: number;
   userAgent?: string;
   failClosed?: boolean;
+  debug?: boolean;
 };
 
 export type AgentControlStep = {
@@ -80,6 +81,12 @@ export type SessionMetadataCacheEntry = {
 
 export type LoggerLike = Pick<OpenClawPluginApi["logger"], "info" | "warn">;
 
+export type PluginLogger = {
+  debug: (message: string) => void;
+  warn: (message: string) => void;
+  block: (message: string) => void;
+};
+
 export type ToolCatalogBundleBuildInfo = {
   bundlePath: string;
   cacheDir: string;
@@ -91,6 +98,7 @@ export type ToolCatalogBundleBuildInfo = {
 
 export type ResolveStepsForContextParams = {
   api: OpenClawPluginApi;
+  logger: PluginLogger;
   sourceAgentId: string;
   sessionKey?: string;
   sessionId?: string;

@@ -33,6 +33,9 @@
       },
       "failClosed": {
         "type": "boolean"
+      },
+      "debug": {
+        "type": "boolean"
       }
     }
   },
@@ -56,6 +59,10 @@
     "failClosed": {
       "label": "Fail Closed",
       "help": "If true, block tool invocations when Agent Control is unavailable."
+    },
+    "debug": {
+      "label": "Debug Logging",
+      "help": "If true, emit verbose plugin diagnostics. If false, only warnings, errors, and block events are logged."
     }
   }
 }
