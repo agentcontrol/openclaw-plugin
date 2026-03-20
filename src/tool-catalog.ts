@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AgentControlStep, LoggerLike, ResolveStepsForContextParams, ToolCatalogBundleBuildInfo, ToolCatalogInternals } from "./types.ts";
+import type {
+  AgentControlStep,
+  PluginLogger,
+  ResolveStepsForContextParams,
+  ToolCatalogBundleBuildInfo,
+  ToolCatalogInternals,
+} from "./types.ts";
 import { asString, sanitizeToolCatalogConfig, secondsSince, toJsonRecord } from "./shared.ts";
 import {
   getResolvedOpenClawRootDir,
@@ -51,14 +57,14 @@ function hasToolCatalogBundleSources(openClawRoot: string): boolean {
 }
 
 async function importToolCatalogBundleModule(
-  logger: LoggerLike,
+  logger: PluginLogger,
   buildInfo: ToolCatalogBundleBuildInfo,
 ): Promise<Record<string, unknown>> {
   const importStartedAt = process.hrtime.bigint();
   const bundleMtime = safeStatMtimeMs(buildInfo.bundlePath) ?? Date.now();
   const bundleUrl = `${pathToFileURL(buildInfo.bundlePath).href}?mtime=${bundleMtime}`;
   const imported = (await import(bundleUrl)) as Record<string, unknown>;
-  logger.info(
+  logger.debug(
     `agent-control: bundle_import_done duration_sec=${secondsSince(importStartedAt)} cache_key=${buildInfo.cacheKey} bundle_path=${buildInfo.bundlePath}`,
   );
   return imported;
@@ -85,18 +91,18 @@ function resolveToolCatalogInternalsFromModules(params: {
 }
 
 async function ensureToolCatalogBundle(
-  logger: LoggerLike,
+  logger: PluginLogger,
   buildInfo: ToolCatalogBundleBuildInfo,
 ): Promise<void> {
   if (fs.existsSync(buildInfo.bundlePath)) {
-    logger.info(
+    logger.debug(
       `agent-control: bundle_cache_hit cache_key=${buildInfo.cacheKey} bundle_path=${buildInfo.bundlePath}`,
     );
     return;
   }
 
   const esbuildStartedAt = process.hrtime.bigint();
-  logger.info(
+  logger.debug(
     `agent-control: bundle_build_started cache_key=${buildInfo.cacheKey} openclaw_root=${buildInfo.openClawRoot}`,
   );
 
@@ -155,13 +161,13 @@ async function ensureToolCatalogBundle(
     )}\n`,
     "utf8",
   );
-  logger.info(
+  logger.debug(
     `agent-control: bundle_build_done duration_sec=${secondsSince(esbuildStartedAt)} cache_key=${buildInfo.cacheKey} bundle_path=${buildInfo.bundlePath}`,
   );
 }
 
 async function loadToolCatalogInternalsFromGeneratedBundle(
-  logger: LoggerLike,
+  logger: PluginLogger,
   openClawRoot: string,
 ): Promise<ToolCatalogInternals | null> {
   if (!hasToolCatalogBundleSources(openClawRoot)) {
@@ -194,7 +200,7 @@ async function loadToolCatalogInternalsFromGeneratedBundle(
   }
 }
 
-async function loadToolCatalogInternals(logger: LoggerLike): Promise<ToolCatalogInternals> {
+async function loadToolCatalogInternals(logger: PluginLogger): Promise<ToolCatalogInternals> {
   if (toolCatalogInternalsPromise) {
     return toolCatalogInternalsPromise;
   }
@@ -212,7 +218,9 @@ async function loadToolCatalogInternals(logger: LoggerLike): Promise<ToolCatalog
       ]),
     ]);
     if (distPiToolsModule && distAdapterModule) {
-      logger.info(`agent-control: tool_catalog_internals source=dist openclaw_root=${openClawRoot}`);
+      logger.debug(
+        `agent-control: tool_catalog_internals source=dist openclaw_root=${openClawRoot}`,
+      );
       return resolveToolCatalogInternalsFromModules({
         adapterModule: distAdapterModule,
         piToolsModule: distPiToolsModule,
@@ -222,7 +230,7 @@ async function loadToolCatalogInternals(logger: LoggerLike): Promise<ToolCatalog
     try {
       const bundledInternals = await loadToolCatalogInternalsFromGeneratedBundle(logger, openClawRoot);
       if (bundledInternals) {
-        logger.info(
+        logger.debug(
           `agent-control: tool_catalog_internals source=generated_bundle openclaw_root=${openClawRoot}`,
         );
         return bundledInternals;
@@ -233,7 +241,7 @@ async function loadToolCatalogInternals(logger: LoggerLike): Promise<ToolCatalog
       );
     }
 
-    logger.info(`agent-control: tool_catalog_internals source=jiti openclaw_root=${openClawRoot}`);
+    logger.debug(`agent-control: tool_catalog_internals source=jiti openclaw_root=${openClawRoot}`);
     const [piToolsModule, adapterModule] = await Promise.all([
       importOpenClawInternalModule(openClawRoot, ["src/agents/pi-tools.ts"]),
       importOpenClawInternalModule(openClawRoot, ["src/agents/pi-tool-definition-adapter.ts"]),
@@ -290,7 +298,7 @@ export async function resolveStepsForContext(
 ): Promise<AgentControlStep[]> {
   const resolveStartedAt = process.hrtime.bigint();
   const internalsStartedAt = process.hrtime.bigint();
-  const internals = await loadToolCatalogInternals(params.api.logger);
+  const internals = await loadToolCatalogInternals(params.logger);
   const internalsDurationSec = secondsSince(internalsStartedAt);
 
   const createToolsStartedAt = process.hrtime.bigint();
@@ -318,7 +326,7 @@ export async function resolveStepsForContext(
   );
   const adaptDurationSec = secondsSince(adaptStartedAt);
 
-  params.api.logger.info(
+  params.logger.debug(
     `agent-control: resolve_steps duration_sec=${secondsSince(resolveStartedAt)} agent=${params.sourceAgentId} internals_sec=${internalsDurationSec} create_tools_sec=${createToolsDurationSec} adapt_sec=${adaptDurationSec} tools=${tools.length} steps=${steps.length}`,
   );
 

@@ -1,5 +1,6 @@
 import { AgentControlClient } from "agent-control";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
+import { createPluginLogger, resolveLogLevel } from "./logging.ts";
 import { resolveStepsForContext } from "./tool-catalog.ts";
 import { buildEvaluationContext } from "./session-context.ts";
 import {
@@ -17,8 +18,8 @@ import {
 import type { AgentControlPluginConfig, AgentState } from "./types.ts";
 
 function collectDenyControlNames(response: {
-  matches?: Array<{ action?: string; controlName?: string }>;
-  errors?: Array<{ action?: string; controlName?: string }>;
+  matches?: Array<{ action?: string; controlName?: string }> | null;
+  errors?: Array<{ action?: string; controlName?: string }> | null;
 }): string[] {
   const names: string[] = [];
   for (const match of [...(response.matches ?? []), ...(response.errors ?? [])]) {
@@ -35,8 +36,8 @@ function collectDenyControlNames(response: {
 
 function buildBlockReason(response: {
   reason?: string | null;
-  matches?: Array<{ action?: string; controlName?: string }>;
-  errors?: Array<{ action?: string; controlName?: string }>;
+  matches?: Array<{ action?: string; controlName?: string }> | null;
+  errors?: Array<{ action?: string; controlName?: string }> | null;
 }): string {
   const denyControls = collectDenyControlNames(response);
   if (denyControls.length > 0) {
@@ -63,10 +64,11 @@ export default function register(api: OpenClawPluginApi) {
   if (cfg.enabled === false) {
     return;
   }
+  const logger = createPluginLogger(api.logger, resolveLogLevel(cfg));
 
   const serverUrl = asString(cfg.serverUrl) ?? asString(process.env.AGENT_CONTROL_SERVER_URL);
   if (!serverUrl) {
-    api.logger.warn(
+    logger.warn(
       "agent-control: disabled because serverUrl is not configured (plugins.entries.agent-control-openclaw-plugin.config.serverUrl)",
     );
     return;
@@ -74,7 +76,7 @@ export default function register(api: OpenClawPluginApi) {
 
   const configuredAgentId = asString(cfg.agentId);
   if (configuredAgentId && !isUuid(configuredAgentId)) {
-    api.logger.warn(`agent-control: configured agentId is not a UUID: ${configuredAgentId}`);
+    logger.warn(`agent-control: configured agentId is not a UUID: ${configuredAgentId}`);
   }
   const hasConfiguredAgentId = configuredAgentId ? isUuid(configuredAgentId) : false;
 
@@ -93,7 +95,7 @@ export default function register(api: OpenClawPluginApi) {
     timeoutMs: clientTimeoutMs,
     userAgent: asString(cfg.userAgent) ?? "openclaw-agent-control-plugin/0.1",
   });
-  api.logger.info(
+  logger.info(
     `agent-control: client_init duration_sec=${secondsSince(clientInitStartedAt)} timeout_ms=${clientTimeoutMs ?? "default"} server_url=${serverUrl}`,
   );
 
@@ -130,23 +132,24 @@ export default function register(api: OpenClawPluginApi) {
 
     const warmupStartedAt = process.hrtime.bigint();
     gatewayWarmupStatus = "running";
-    api.logger.info(`agent-control: gateway_boot_warmup started agent=${BOOT_WARMUP_AGENT_ID}`);
+    logger.info(`agent-control: gateway_boot_warmup started agent=${BOOT_WARMUP_AGENT_ID}`);
 
     // Warm the exact resolver path used during tool evaluation so the gateway
     // process retains the expensive module graph in memory after startup.
     gatewayWarmupPromise = resolveStepsForContext({
       api,
+      logger,
       sourceAgentId: BOOT_WARMUP_AGENT_ID,
     })
       .then((steps) => {
         gatewayWarmupStatus = "done";
-        api.logger.info(
+        logger.info(
           `agent-control: gateway_boot_warmup done duration_sec=${secondsSince(warmupStartedAt)} agent=${BOOT_WARMUP_AGENT_ID} steps=${steps.length}`,
         );
       })
       .catch((err) => {
         gatewayWarmupStatus = "failed";
-        api.logger.warn(
+        logger.warn(
           `agent-control: gateway_boot_warmup failed duration_sec=${secondsSince(warmupStartedAt)} agent=${BOOT_WARMUP_AGENT_ID} error=${String(err)}`,
         );
       });
@@ -165,6 +168,7 @@ export default function register(api: OpenClawPluginApi) {
 
     const currentHash = state.stepsHash;
     const promise = (async () => {
+      const syncStartedAt = process.hrtime.bigint();
       await client.agents.init({
         agent: {
           agentName: state.agentName,
@@ -178,6 +182,9 @@ export default function register(api: OpenClawPluginApi) {
         },
         steps: state.steps,
       });
+      logger.info(
+        `agent-control: sync_agent duration_sec=${secondsSince(syncStartedAt)} agent=${state.sourceAgentId} step_count=${state.steps.length}`,
+      );
       state.lastSyncedStepsHash = currentHash;
     })().finally(() => {
       state.syncPromise = null;
@@ -201,18 +208,18 @@ export default function register(api: OpenClawPluginApi) {
     const sourceAgentId = resolveSourceAgentId(ctx.agentId);
     const state = getOrCreateState(sourceAgentId);
     const argsForLog = formatToolArgsForLog(event.params);
-    api.logger.info(
+    logger.debug(
       `agent-control: before_tool_call entered agent=${sourceAgentId} tool=${event.toolName} args=${argsForLog}`,
     );
 
     try {
       if (gatewayWarmupStatus === "running" && gatewayWarmupPromise) {
         const warmupWaitStartedAt = process.hrtime.bigint();
-        api.logger.info(
+        logger.debug(
           `agent-control: before_tool_call waiting_for_gateway_boot_warmup=true agent=${sourceAgentId} tool=${event.toolName}`,
         );
         await gatewayWarmupPromise;
-        api.logger.info(
+        logger.debug(
           `agent-control: before_tool_call phase=wait_boot_warmup duration_sec=${secondsSince(warmupWaitStartedAt)} agent=${sourceAgentId} tool=${event.toolName} warmup_status=${gatewayWarmupStatus}`,
         );
       }
@@ -221,6 +228,7 @@ export default function register(api: OpenClawPluginApi) {
         const resolveStepsStartedAt = process.hrtime.bigint();
         const nextSteps = await resolveStepsForContext({
           api,
+          logger,
           sourceAgentId,
           sessionKey: ctx.sessionKey,
           sessionId: ctx.sessionId,
@@ -231,20 +239,23 @@ export default function register(api: OpenClawPluginApi) {
           state.steps = nextSteps;
           state.stepsHash = nextStepsHash;
         }
-        api.logger.info(
+        logger.debug(
           `agent-control: before_tool_call phase=resolve_steps duration_sec=${secondsSince(resolveStepsStartedAt)} agent=${sourceAgentId} tool=${event.toolName} steps=${nextSteps.length}`,
         );
 
         const syncStartedAt = process.hrtime.bigint();
         await syncAgent(state);
-        api.logger.info(
+        logger.debug(
           `agent-control: before_tool_call phase=sync_agent duration_sec=${secondsSince(syncStartedAt)} agent=${sourceAgentId} tool=${event.toolName} step_count=${state.steps.length}`,
         );
       } catch (err) {
-        api.logger.warn(
+        logger.warn(
           `agent-control: unable to sync agent=${sourceAgentId} before tool evaluation: ${String(err)}`,
         );
         if (failClosed) {
+          logger.block(
+            `agent-control: blocked tool=${event.toolName} agent=${sourceAgentId} reason=agent_sync_failed fail_closed=true`,
+          );
           return {
             block: true,
             blockReason: USER_BLOCK_MESSAGE,
@@ -274,11 +285,11 @@ export default function register(api: OpenClawPluginApi) {
           configuredAgentId,
           configuredAgentVersion,
         });
-        api.logger.info(
+        logger.debug(
           `agent-control: before_tool_call phase=build_context duration_sec=${secondsSince(contextBuildStartedAt)} agent=${sourceAgentId} tool=${event.toolName}`,
         );
 
-        api.logger.info(
+        logger.debug(
           `agent-control: before_tool_call evaluated agent=${sourceAgentId} tool=${event.toolName} args=${argsForLog} context=${JSON.stringify(context, null, 2)}`,
         );
 
@@ -295,17 +306,15 @@ export default function register(api: OpenClawPluginApi) {
             },
           },
         });
-        api.logger.info(
+        logger.debug(
           `agent-control: before_tool_call phase=evaluate duration_sec=${secondsSince(evaluateStartedAt)} agent=${sourceAgentId} tool=${event.toolName} safe=${evaluation.isSafe}`,
         );
 
         if (evaluation.isSafe) {
-          api.logger.info("safe !");
           return;
         }
 
-        api.logger.info("unsafe !");
-        api.logger.warn(
+        logger.block(
           `agent-control: blocked tool=${event.toolName} agent=${sourceAgentId} reason=${buildBlockReason(evaluation)}`,
         );
         return {
@@ -313,10 +322,13 @@ export default function register(api: OpenClawPluginApi) {
           blockReason: USER_BLOCK_MESSAGE,
         };
       } catch (err) {
-        api.logger.warn(
+        logger.warn(
           `agent-control: evaluation failed for agent=${sourceAgentId} tool=${event.toolName}: ${String(err)}`,
         );
         if (failClosed) {
+          logger.block(
+            `agent-control: blocked tool=${event.toolName} agent=${sourceAgentId} reason=evaluation_failed fail_closed=true`,
+          );
           return {
             block: true,
             blockReason: USER_BLOCK_MESSAGE,
@@ -325,7 +337,7 @@ export default function register(api: OpenClawPluginApi) {
         return;
       }
     } finally {
-      api.logger.info(
+      logger.debug(
         `agent-control: before_tool_call duration_sec=${secondsSince(beforeToolCallStartedAt)} agent=${sourceAgentId} tool=${event.toolName}`,
       );
     }

@@ -1,5 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 
+export type LogLevel = "warn" | "info" | "debug";
+
 export type AgentControlPluginConfig = {
   enabled?: boolean;
   serverUrl?: string;
@@ -10,6 +12,8 @@ export type AgentControlPluginConfig = {
   timeoutMs?: number;
   userAgent?: string;
   failClosed?: boolean;
+  logLevel?: LogLevel;
+  debug?: boolean;
 };
 
 export type AgentControlStep = {
@@ -80,6 +84,13 @@ export type SessionMetadataCacheEntry = {
 
 export type LoggerLike = Pick<OpenClawPluginApi["logger"], "info" | "warn">;
 
+export type PluginLogger = {
+  info: (message: string) => void;
+  debug: (message: string) => void;
+  warn: (message: string) => void;
+  block: (message: string) => void;
+};
+
 export type ToolCatalogBundleBuildInfo = {
   bundlePath: string;
   cacheDir: string;
@@ -91,6 +102,7 @@ export type ToolCatalogBundleBuildInfo = {
 
 export type ResolveStepsForContextParams = {
   api: OpenClawPluginApi;
+  logger: PluginLogger;
   sourceAgentId: string;
   sessionKey?: string;
   sessionId?: string;

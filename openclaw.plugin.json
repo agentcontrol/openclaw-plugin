@@ -33,6 +33,13 @@
       },
       "failClosed": {
         "type": "boolean"
+      },
+      "logLevel": {
+        "type": "string",
+        "enum": ["warn", "info", "debug"]
+      },
+      "debug": {
+        "type": "boolean"
       }
     }
   },
@@ -56,6 +63,14 @@
     "failClosed": {
       "label": "Fail Closed",
       "help": "If true, block tool invocations when Agent Control is unavailable."
+    },
+    "logLevel": {
+      "label": "Log Level",
+      "help": "Controls plugin verbosity: warn logs only warnings, errors, and block events; info adds high-level lifecycle logs; debug adds verbose diagnostics."
+    },
+    "debug": {
+      "label": "Debug Logging",
+      "help": "Deprecated alias for logLevel=debug."
     }
   }
 }

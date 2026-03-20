@@ -29,6 +29,9 @@
   "scripts": {
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "release": "semantic-release"
   },
   "dependencies": {
@@ -37,9 +40,12 @@
     "jiti": "^2.6.1"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
     "@semantic-release/git": "^10.0.1",
+    "@types/node": "^24.5.2",
     "oxlint": "^0.15.0",
     "semantic-release": "^25.0.3",
+    "typescript": "^5.9.2",
     "vitest": "^4.0.18"
   },
   "openclaw": {
