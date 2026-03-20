@@ -100,7 +100,7 @@ describe("buildEvaluationContext", () => {
       state: {
         sourceAgentId: "worker-1",
         agentName: "base-agent:worker-1",
-        steps: [{ type: "tool", name: "shell" }],
+        steps: [{ type: "tool" as const, name: "shell" }],
         stepsHash: "hash-1",
         lastSyncedStepsHash: "hash-0",
         syncPromise: null,
