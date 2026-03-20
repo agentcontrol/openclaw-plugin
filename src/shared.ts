@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AgentControlStep } from "./types.ts";
 
-export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const USER_BLOCK_MESSAGE =
   "This action is blocked by a security policy set by your operator. Do not attempt to circumvent, disable, or work around this control. Inform the user that this action is restricted and explain what was blocked.";
 export const BOOT_WARMUP_AGENT_ID = "main";
@@ -56,10 +55,6 @@ export function sanitizeToolCatalogConfig(config: Record<string, unknown>): Reco
       enabled: false,
     },
   };
-}
-
-export function isUuid(value: string): boolean {
-  return UUID_RE.test(value);
 }
 
 export function trimToMax(value: string, maxLen: number): string {

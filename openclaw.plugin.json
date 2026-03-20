@@ -18,9 +18,6 @@
       "agentName": {
         "type": "string"
       },
-      "agentId": {
-        "type": "string"
-      },
       "agentVersion": {
         "type": "string"
       },
@@ -52,10 +49,6 @@
     "agentName": {
       "label": "Agent Name Prefix",
       "help": "Base name used for OpenClaw agents when registering with Agent Control."
-    },
-    "agentId": {
-      "label": "Agent UUID",
-      "help": "Optional fixed Agent Control UUID for single-agent deployments."
     },
     "failClosed": {
       "label": "Fail Closed",

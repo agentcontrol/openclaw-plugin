@@ -10,7 +10,6 @@ import {
   formatToolArgsForLog,
   hashSteps,
   isRecord,
-  isUuid,
   secondsSince,
   trimToMax,
   USER_BLOCK_MESSAGE,
@@ -74,12 +73,6 @@ export default function register(api: OpenClawPluginApi) {
     return;
   }
 
-  const configuredAgentId = asString(cfg.agentId);
-  if (configuredAgentId && !isUuid(configuredAgentId)) {
-    logger.warn(`agent-control: configured agentId is not a UUID: ${configuredAgentId}`);
-  }
-  const hasConfiguredAgentId = configuredAgentId ? isUuid(configuredAgentId) : false;
-
   const failClosed = cfg.failClosed === true;
   const baseAgentName = asString(cfg.agentName) ?? "openclaw-agent";
   const configuredAgentVersion = asString(cfg.agentVersion);
@@ -109,9 +102,7 @@ export default function register(api: OpenClawPluginApi) {
       return existing;
     }
 
-    const agentName = hasConfiguredAgentId
-      ? trimToMax(baseAgentName, 255)
-      : trimToMax(`${baseAgentName}:${sourceAgentId}`, 255);
+    const agentName = trimToMax(`${baseAgentName}:${sourceAgentId}`, 255);
 
     const created: AgentState = {
       sourceAgentId,
@@ -176,7 +167,6 @@ export default function register(api: OpenClawPluginApi) {
           agentMetadata: {
             source: "openclaw",
             openclawAgentId: state.sourceAgentId,
-            ...(configuredAgentId ? { openclawConfiguredAgentId: configuredAgentId } : {}),
             pluginId: api.id,
           },
         },
@@ -282,7 +272,6 @@ export default function register(api: OpenClawPluginApi) {
           },
           pluginVersion,
           failClosed,
-          configuredAgentId,
           configuredAgentVersion,
         });
         logger.debug(

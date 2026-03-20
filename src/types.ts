@@ -7,7 +7,6 @@ export type AgentControlPluginConfig = {
   serverUrl?: string;
   apiKey?: string;
   agentName?: string;
-  agentId?: string;
   agentVersion?: string;
   timeoutMs?: number;
   userAgent?: string;

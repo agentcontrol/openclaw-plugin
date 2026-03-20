@@ -63,7 +63,6 @@ openclaw config set plugins.entries.agent-control-openclaw-plugin.config.apiKey 
 | `serverUrl` | string | — | Base URL for the Agent Control server. **Required.** |
 | `apiKey` | string | — | API key for authenticating with Agent Control. |
 | `agentName` | string | `openclaw-agent` | Base name used when registering agents with Agent Control. |
-| `agentId` | UUID string | — | Fixed Agent Control UUID for single-agent deployments. When set, all agents share this identity instead of getting per-agent names. |
 | `agentVersion` | string | — | Version string sent to Agent Control during agent sync. |
 | `timeoutMs` | integer | SDK default | Client timeout in milliseconds. |
 | `failClosed` | boolean | `false` | Block tool calls when Agent Control is unreachable. See [Fail-open vs fail-closed](#fail-open-vs-fail-closed). |
@@ -133,7 +132,6 @@ openclaw plugins disable agent-control-openclaw-plugin
 ```bash
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.apiKey
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.logLevel
-openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.agentId
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.agentVersion
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.userAgent
 ```
