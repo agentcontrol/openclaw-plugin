@@ -81,7 +81,6 @@ openclaw config set plugins.entries.agent-control-openclaw-plugin.config.userAge
 # Remove optional keys
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.apiKey
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.logLevel
-openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.debug
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.agentId
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.agentVersion
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.userAgent
@@ -96,5 +95,3 @@ Set `config.logLevel` to:
 
 - `info` for one-line lifecycle logs such as client init, warmup, and agent syncs
 - `debug` for verbose startup, sync, and evaluation diagnostics
-
-The older `config.debug` flag is still accepted as a deprecated alias for `logLevel=debug`.

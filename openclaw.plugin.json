@@ -37,9 +37,6 @@
       "logLevel": {
         "type": "string",
         "enum": ["warn", "info", "debug"]
-      },
-      "debug": {
-        "type": "boolean"
       }
     }
   },
@@ -67,10 +64,6 @@
     "logLevel": {
       "label": "Log Level",
       "help": "Controls plugin verbosity: warn logs only warnings, errors, and block events; info adds high-level lifecycle logs; debug adds verbose diagnostics."
-    },
-    "debug": {
-      "label": "Debug Logging",
-      "help": "Deprecated alias for logLevel=debug."
     }
   }
 }
