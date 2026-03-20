@@ -49,10 +49,15 @@ afterEach(() => {
 });
 
 describe("resolveSessionIdentity", () => {
-  it("Given no session key, when session identity is resolved, then an unknown identity is returned", async () => {
+  it("returns an unknown identity when no session key is provided", async () => {
+    // Given
     const { resolveSessionIdentity } = await loadSessionStoreModule();
 
-    await expect(resolveSessionIdentity(undefined)).resolves.toEqual({
+    // When
+    const identityPromise = resolveSessionIdentity(undefined);
+
+    // Then
+    await expect(identityPromise).resolves.toEqual({
       provider: null,
       type: "unknown",
       channelName: null,
@@ -65,7 +70,8 @@ describe("resolveSessionIdentity", () => {
     });
   });
 
-  it("Given a direct-message session entry, when session identity is resolved, then DM metadata is mapped from the store", async () => {
+  it("maps direct-message metadata from the session store", async () => {
+    // Given
     const { resolveSessionIdentity } = await loadSessionStoreModule({
       initialStore: {
         "agent:worker-1:slack:direct:alice": {
@@ -82,7 +88,11 @@ describe("resolveSessionIdentity", () => {
       },
     });
 
-    await expect(resolveSessionIdentity("agent:worker-1:slack:direct:alice")).resolves.toEqual({
+    // When
+    const identityPromise = resolveSessionIdentity("agent:worker-1:slack:direct:alice");
+
+    // Then
+    await expect(identityPromise).resolves.toEqual({
       provider: "slack",
       type: "direct",
       channelName: null,
@@ -95,7 +105,8 @@ describe("resolveSessionIdentity", () => {
     });
   });
 
-  it("Given only a base session entry exists, when a thread-specific session key is resolved, then the base session metadata is used", async () => {
+  it("reuses base session metadata for thread-specific keys", async () => {
+    // Given
     const { resolveSessionIdentity } = await loadSessionStoreModule({
       initialStore: {
         "agent:worker-1:slack:channel:eng": {
@@ -109,9 +120,11 @@ describe("resolveSessionIdentity", () => {
       },
     });
 
-    await expect(
-      resolveSessionIdentity("agent:worker-1:slack:channel:eng:thread:123"),
-    ).resolves.toMatchObject({
+    // When
+    const identityPromise = resolveSessionIdentity("agent:worker-1:slack:channel:eng:thread:123");
+
+    // Then
+    await expect(identityPromise).resolves.toMatchObject({
       provider: "slack",
       type: "channel",
       channelName: "eng",
@@ -120,7 +133,8 @@ describe("resolveSessionIdentity", () => {
     });
   });
 
-  it("Given the same session is resolved twice before the TTL expires, when the underlying store changes, then the cached identity is reused", async () => {
+  it("reuses the cached identity before the TTL expires", async () => {
+    // Given
     vi.useFakeTimers();
     const { resolveSessionIdentity, mocks } = await loadSessionStoreModule({
       initialStore: {
@@ -134,6 +148,7 @@ describe("resolveSessionIdentity", () => {
       },
     });
 
+    // When
     const first = await resolveSessionIdentity("agent:worker-1:slack:direct:alice");
     mocks.setStore({
       "agent:worker-1:slack:direct:alice": {
@@ -146,12 +161,14 @@ describe("resolveSessionIdentity", () => {
     });
     const second = await resolveSessionIdentity("agent:worker-1:slack:direct:alice");
 
+    // Then
     expect(first.label).toBe("Alice");
     expect(second.label).toBe("Alice");
     expect(mocks.loadSessionStore).toHaveBeenCalledTimes(1);
   });
 
-  it("Given the session metadata TTL has expired, when the underlying store changes, then the refreshed identity is returned", async () => {
+  it("refreshes the identity after the TTL expires", async () => {
+    // Given
     vi.useFakeTimers();
     const { resolveSessionIdentity, mocks } = await loadSessionStoreModule({
       initialStore: {
@@ -165,6 +182,7 @@ describe("resolveSessionIdentity", () => {
       },
     });
 
+    // When
     await expect(resolveSessionIdentity("agent:worker-1:slack:direct:alice")).resolves.toMatchObject({
       label: "Alice",
     });
@@ -180,18 +198,24 @@ describe("resolveSessionIdentity", () => {
     });
     vi.advanceTimersByTime(2_001);
 
+    // Then
     await expect(resolveSessionIdentity("agent:worker-1:slack:direct:alice")).resolves.toMatchObject({
       label: "Bob",
     });
     expect(mocks.loadSessionStore).toHaveBeenCalledTimes(2);
   });
 
-  it("Given the OpenClaw session-store internals cannot be loaded, when session identity is resolved, then an unknown identity is returned", async () => {
+  it("returns an unknown identity when session-store internals cannot be loaded", async () => {
+    // Given
     const { resolveSessionIdentity } = await loadSessionStoreModule({
       throws: true,
     });
 
-    await expect(resolveSessionIdentity("agent:worker-1:slack:direct:alice")).resolves.toEqual({
+    // When
+    const identityPromise = resolveSessionIdentity("agent:worker-1:slack:direct:alice");
+
+    // Then
+    await expect(identityPromise).resolves.toEqual({
       provider: null,
       type: "unknown",
       channelName: null,

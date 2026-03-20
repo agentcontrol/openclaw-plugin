@@ -82,7 +82,8 @@ afterEach(() => {
 });
 
 describe("resolveStepsForContext", () => {
-  it("Given duplicate and invalid tool definitions, when steps are resolved, then the last valid definition wins and the synced config disables plugins", async () => {
+  it("deduplicates definitions and disables plugins in synced config", async () => {
+    // Given
     const createOpenClawCodingTools = vi.fn(() => ["tool-marker"]);
     const toToolDefinitions = vi.fn(() => [
       {
@@ -115,6 +116,7 @@ describe("resolveStepsForContext", () => {
     });
     const logger = createLogger();
 
+    // When
     const steps = await resolveStepsForContext({
       api: createApi({
         plugins: {
@@ -130,6 +132,7 @@ describe("resolveStepsForContext", () => {
       runId: "run-1",
     });
 
+    // Then
     expect(steps).toEqual([
       {
         type: "tool",
@@ -167,7 +170,8 @@ describe("resolveStepsForContext", () => {
     );
   });
 
-  it("Given dist internals are unavailable, when steps are resolved, then the source-module fallback is used", async () => {
+  it("falls back to source modules when dist internals are unavailable", async () => {
+    // Given
     const openClawRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tool-catalog-source-"));
     const createOpenClawCodingTools = vi.fn(() => ["tool-marker"]);
     const toToolDefinitions = vi.fn(() => [
@@ -187,12 +191,14 @@ describe("resolveStepsForContext", () => {
       sourceAdapterModule: { toToolDefinitions },
     });
 
+    // When
     const steps = await resolveStepsForContext({
       api: createApi({}),
       logger: createLogger(),
       sourceAgentId: "worker-1",
     });
 
+    // Then
     expect(steps).toEqual([
       {
         type: "tool",

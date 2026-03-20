@@ -30,7 +30,8 @@ afterEach(() => {
 });
 
 describe("openclaw runtime helpers", () => {
-  it("Given a valid package.json, when package fields are read, then name and version are returned", async () => {
+  it("reads the package name and version from package.json", async () => {
+    // Given
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-runtime-pkg-"));
     const packageJsonPath = path.join(tempDir, "package.json");
     fs.writeFileSync(
@@ -41,18 +42,30 @@ describe("openclaw runtime helpers", () => {
 
     const runtime = await loadRuntimeModule();
 
-    expect(runtime.readPackageName(packageJsonPath)).toBe("openclaw");
-    expect(runtime.readPackageVersion(packageJsonPath)).toBe("1.2.3");
+    // When
+    const name = runtime.readPackageName(packageJsonPath);
+    const version = runtime.readPackageVersion(packageJsonPath);
+
+    // Then
+    expect(name).toBe("openclaw");
+    expect(version).toBe("1.2.3");
   });
 
-  it("Given source and target files in sibling directories, when the import path is normalized, then a relative posix path with a leading dot is returned", async () => {
+  it("normalizes relative import paths with a leading dot", async () => {
+    // Given
     const runtime = await loadRuntimeModule();
 
-    expect(runtime.normalizeRelativeImportPath("/tmp/a/b", "/tmp/a/c/tool.ts")).toBe("../c/tool.ts");
-    expect(runtime.normalizeRelativeImportPath("/tmp/a/b", "/tmp/a/b/tool.ts")).toBe("./tool.ts");
+    // When
+    const siblingImport = runtime.normalizeRelativeImportPath("/tmp/a/b", "/tmp/a/c/tool.ts");
+    const sameDirImport = runtime.normalizeRelativeImportPath("/tmp/a/b", "/tmp/a/b/tool.ts");
+
+    // Then
+    expect(siblingImport).toBe("../c/tool.ts");
+    expect(sameDirImport).toBe("./tool.ts");
   });
 
-  it("Given package resolution is unavailable but the current working directory is inside an OpenClaw checkout, when the root dir is resolved, then the checkout root is found from cwd", async () => {
+  it("finds the OpenClaw root from cwd when package resolution is unavailable", async () => {
+    // Given
     const openClawRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-root-"));
     fs.writeFileSync(
       path.join(openClawRoot, "package.json"),
@@ -67,10 +80,15 @@ describe("openclaw runtime helpers", () => {
       packageResolve: new Error("not found"),
     });
 
-    expect(runtime.getResolvedOpenClawRootDir()).toBe(fs.realpathSync(openClawRoot));
+    // When
+    const resolvedRoot = runtime.getResolvedOpenClawRootDir();
+
+    // Then
+    expect(resolvedRoot).toBe(fs.realpathSync(openClawRoot));
   });
 
-  it("Given package resolution is unavailable and no OpenClaw checkout can be found, when the root dir is resolved, then a helpful error is thrown", async () => {
+  it("throws a helpful error when no OpenClaw root can be found", async () => {
+    // Given
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-missing-"));
     process.chdir(tempDir);
 
@@ -78,42 +96,62 @@ describe("openclaw runtime helpers", () => {
       packageResolve: new Error("not found"),
     });
 
-    expect(() => runtime.getResolvedOpenClawRootDir()).toThrow(
+    // When
+    const resolveRoot = () => runtime.getResolvedOpenClawRootDir();
+
+    // Then
+    expect(resolveRoot).toThrow(
       "agent-control: unable to resolve openclaw package root for internal tool schema access",
     );
   });
 
-  it("Given a JavaScript candidate exists, when tryImportOpenClawInternalModule is called, then the first importable candidate is returned", async () => {
+  it("returns the first importable JavaScript candidate", async () => {
+    // Given
     const openClawRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-import-js-"));
     fs.mkdirSync(path.join(openClawRoot, "dist"), { recursive: true });
     fs.writeFileSync(path.join(openClawRoot, "dist", "candidate.mjs"), "export const value = 123;\n", "utf8");
 
     const runtime = await loadRuntimeModule();
+
+    // When
     const imported = await runtime.tryImportOpenClawInternalModule(openClawRoot, [
       "dist/missing.mjs",
       "dist/candidate.mjs",
     ]);
 
+    // Then
     expect(imported).toMatchObject({ value: 123 });
   });
 
-  it("Given a TypeScript candidate exists, when importOpenClawInternalModule is called, then the module is loaded through jiti", async () => {
+  it("loads a TypeScript candidate through jiti", async () => {
+    // Given
     const openClawRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-import-ts-"));
     fs.mkdirSync(path.join(openClawRoot, "src"), { recursive: true });
     fs.writeFileSync(path.join(openClawRoot, "src", "candidate.ts"), "export const value = 123;\n", "utf8");
 
     const runtime = await loadRuntimeModule();
+
+    // When
     const imported = await runtime.importOpenClawInternalModule(openClawRoot, ["src/candidate.ts"]);
 
+    // Then
     expect(imported).toMatchObject({ value: 123 });
   });
 
-  it("Given no candidates are importable, when importOpenClawInternalModule is called, then the thrown error names the attempted candidates", async () => {
+  it("names attempted candidates when no module can be imported", async () => {
+    // Given
     const openClawRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-import-missing-"));
     const runtime = await loadRuntimeModule();
 
+    // When
+    const importPromise = runtime.importOpenClawInternalModule(openClawRoot, [
+      "src/missing.ts",
+      "dist/missing.js",
+    ]);
+
+    // Then
     await expect(
-      runtime.importOpenClawInternalModule(openClawRoot, ["src/missing.ts", "dist/missing.js"]),
+      importPromise,
     ).rejects.toThrow(
       `agent-control: openclaw internal module not found (src/missing.ts, dist/missing.js) under ${openClawRoot}`,
     );

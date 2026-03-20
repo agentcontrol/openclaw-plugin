@@ -9,28 +9,54 @@ import {
 } from "../src/shared.ts";
 
 describe("shared utilities", () => {
-  it("Given a blank string, when it is normalized, then undefined is returned", () => {
-    expect(asString("   ")).toBeUndefined();
+  it("returns undefined for a blank string", () => {
+    // Given
+    const value = "   ";
+
+    // When
+    const normalized = asString(value);
+
+    // Then
+    expect(normalized).toBeUndefined();
   });
 
-  it("Given a positive floating-point number, when it is normalized, then it is floored to a positive integer", () => {
-    expect(asPositiveInt(42.9)).toBe(42);
+  it("floors a positive floating-point number", () => {
+    // Given
+    const value = 42.9;
+
+    // When
+    const normalized = asPositiveInt(value);
+
+    // Then
+    expect(normalized).toBe(42);
   });
 
-  it("Given a non-record value, when it is serialized as a JSON record, then undefined is returned", () => {
-    expect(toJsonRecord(["not", "a", "record"])).toBeUndefined();
+  it("returns undefined for a non-record JSON value", () => {
+    // Given
+    const value = ["not", "a", "record"];
+
+    // When
+    const record = toJsonRecord(value);
+
+    // Then
+    expect(record).toBeUndefined();
   });
 
-  it("Given a plugin config with plugins enabled, when the tool catalog config is sanitized, then plugins are forced off and sibling fields are preserved", () => {
-    expect(
-      sanitizeToolCatalogConfig({
-        mode: "test",
-        plugins: {
-          enabled: true,
-          keepMe: "yes",
-        },
-      }),
-    ).toEqual({
+  it("forces plugins off while preserving sibling config", () => {
+    // Given
+    const config = {
+      mode: "test",
+      plugins: {
+        enabled: true,
+        keepMe: "yes",
+      },
+    };
+
+    // When
+    const sanitized = sanitizeToolCatalogConfig(config);
+
+    // Then
+    expect(sanitized).toEqual({
       mode: "test",
       plugins: {
         enabled: false,
@@ -39,16 +65,27 @@ describe("shared utilities", () => {
     });
   });
 
-  it("Given an unserializable argument payload, when it is formatted for logs, then a stable placeholder is returned", () => {
+  it("returns a stable placeholder for unserializable arguments", () => {
+    // Given
     const circular: { self?: unknown } = {};
     circular.self = circular;
 
-    expect(formatToolArgsForLog(circular)).toBe("[unserializable]");
+    // When
+    const formatted = formatToolArgsForLog(circular);
+
+    // Then
+    expect(formatted).toBe("[unserializable]");
   });
 
-  it("Given two identical step arrays, when they are hashed, then they produce the same digest", () => {
+  it("produces the same digest for identical steps", () => {
+    // Given
     const steps = [{ type: "tool" as const, name: "shell" }];
 
-    expect(hashSteps(steps)).toBe(hashSteps(steps));
+    // When
+    const first = hashSteps(steps);
+    const second = hashSteps(steps);
+
+    // Then
+    expect(first).toBe(second);
   });
 });

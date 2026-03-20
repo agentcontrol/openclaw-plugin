@@ -121,23 +121,29 @@ beforeEach(() => {
 });
 
 describe("agent-control plugin logging and blocking", () => {
-  it("Given the plugin is disabled, when it is registered, then it does not initialize the client or hooks", () => {
+  it("skips initialization when the plugin is disabled", () => {
+    // Given
     const api = createMockApi({
       enabled: false,
       serverUrl: "http://localhost:8000",
     });
 
+    // When
     register(api.api);
 
+    // Then
     expect(clientMocks.init).not.toHaveBeenCalled();
     expect(api.handlers.size).toBe(0);
   });
 
-  it("Given no server URL is configured, when the plugin is registered, then it warns and skips hook registration", () => {
+  it("warns and skips hook registration when no server URL is configured", () => {
+    // Given
     const api = createMockApi({});
 
+    // When
     register(api.api);
 
+    // Then
     expect(clientMocks.init).not.toHaveBeenCalled();
     expect(api.handlers.size).toBe(0);
     expect(api.warn).toHaveBeenCalledWith(
@@ -145,20 +151,24 @@ describe("agent-control plugin logging and blocking", () => {
     );
   });
 
-  it("Given an invalid configured agent ID, when the plugin is registered, then it warns about the invalid UUID", () => {
+  it("warns when the configured agent ID is not a UUID", () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
       agentId: "not-a-uuid",
     });
 
+    // When
     register(api.api);
 
+    // Then
     expect(api.warn).toHaveBeenCalledWith(
       "agent-control: configured agentId is not a UUID: not-a-uuid",
     );
   });
 
-  it("Given warn mode, when an unsafe evaluation occurs, then only the block event is logged", async () => {
+  it("only logs the block event in warn mode for unsafe evaluations", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
     });
@@ -168,9 +178,11 @@ describe("agent-control plugin logging and blocking", () => {
       reason: "denied by policy",
     });
 
+    // When
     register(api.api);
     const result = await runBeforeToolCall(api);
 
+    // Then
     expect(result).toEqual({
       block: true,
       blockReason: USER_BLOCK_MESSAGE,
@@ -182,16 +194,19 @@ describe("agent-control plugin logging and blocking", () => {
     expect(clientMocks.evaluationEvaluate).toHaveBeenCalledOnce();
   });
 
-  it("Given info mode, when warmup and a tool evaluation run, then lifecycle logs are emitted without debug traces", async () => {
+  it("emits lifecycle logs without debug traces in info mode", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
       logLevel: "info",
     });
 
+    // When
     register(api.api);
     await runGatewayStart(api);
     await runBeforeToolCall(api);
 
+    // Then
     const messages = api.info.mock.calls.map(([message]) => String(message));
     expect(messages.some((message) => message.includes("client_init"))).toBe(true);
     expect(messages.some((message) => message.includes("gateway_boot_warmup started"))).toBe(true);
@@ -201,21 +216,25 @@ describe("agent-control plugin logging and blocking", () => {
     expect(messages.some((message) => message.includes("evaluated agent="))).toBe(false);
   });
 
-  it("Given the deprecated debug flag, when a tool evaluation runs, then verbose debug traces are emitted", async () => {
+  it("emits verbose traces when the deprecated debug flag is enabled", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
       debug: true,
     });
 
+    // When
     register(api.api);
     await runBeforeToolCall(api);
 
+    // Then
     const messages = api.info.mock.calls.map(([message]) => String(message));
     expect(messages.some((message) => message.includes("before_tool_call entered"))).toBe(true);
     expect(messages.some((message) => message.includes("phase=evaluate"))).toBe(true);
   });
 
-  it("Given fail-closed mode, when step resolution fails, then the tool call is blocked before evaluation", async () => {
+  it("blocks the tool call before evaluation when fail-closed sync fails", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
       failClosed: true,
@@ -223,9 +242,11 @@ describe("agent-control plugin logging and blocking", () => {
 
     resolveStepsForContextMock.mockRejectedValueOnce(new Error("resolver exploded"));
 
+    // When
     register(api.api);
     const result = await runBeforeToolCall(api);
 
+    // Then
     expect(result).toEqual({
       block: true,
       blockReason: USER_BLOCK_MESSAGE,
@@ -240,16 +261,19 @@ describe("agent-control plugin logging and blocking", () => {
     );
   });
 
-  it("Given a fixed configured agent ID, when a source agent evaluates a tool, then the base agent name is used without a source suffix", async () => {
+  it("uses the base agent name when a fixed configured agent ID is present", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
       agentId: VALID_AGENT_ID,
       agentName: "base-agent",
     });
 
+    // When
     register(api.api);
     await runBeforeToolCall(api, {}, { agentId: "worker-1" });
 
+    // Then
     expect(clientMocks.agentsInit).toHaveBeenCalledWith(
       expect.objectContaining({
         agent: expect.objectContaining({
@@ -262,15 +286,18 @@ describe("agent-control plugin logging and blocking", () => {
     );
   });
 
-  it("Given no configured agent ID, when a source agent evaluates a tool, then the source agent ID is appended to the base agent name", async () => {
+  it("appends the source agent ID when no configured agent ID is present", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
       agentName: "base-agent",
     });
 
+    // When
     register(api.api);
     await runBeforeToolCall(api, {}, { agentId: "worker-1" });
 
+    // Then
     expect(clientMocks.agentsInit).toHaveBeenCalledWith(
       expect.objectContaining({
         agent: expect.objectContaining({
@@ -280,15 +307,18 @@ describe("agent-control plugin logging and blocking", () => {
     );
   });
 
-  it("Given gateway warmup has already started, when gateway_start fires again, then the warmup work is reused", async () => {
+  it("reuses warmup work across repeated gateway_start events", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
     });
 
+    // When
     register(api.api);
     await runGatewayStart(api);
     await runGatewayStart(api);
 
+    // Then
     expect(resolveStepsForContextMock).toHaveBeenCalledTimes(1);
     expect(resolveStepsForContextMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -297,13 +327,15 @@ describe("agent-control plugin logging and blocking", () => {
     );
   });
 
-  it("Given two concurrent tool calls for the same source agent, when sync is already in flight, then Agent Control is initialized only once", async () => {
+  it("deduplicates concurrent syncs for the same source agent", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
     });
     const syncDeferred = createDeferred<void>();
     clientMocks.agentsInit.mockImplementation(() => syncDeferred.promise);
 
+    // When
     register(api.api);
 
     const first = runBeforeToolCall(api);
@@ -316,23 +348,28 @@ describe("agent-control plugin logging and blocking", () => {
     syncDeferred.resolve(undefined);
     await Promise.all([first, second]);
 
+    // Then
     expect(clientMocks.evaluationEvaluate).toHaveBeenCalledTimes(2);
   });
 
-  it("Given the synced step catalog is unchanged, when the same source agent evaluates another tool, then the second call skips resyncing the agent", async () => {
+  it("skips resyncing when the step catalog has not changed", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
     });
 
+    // When
     register(api.api);
     await runBeforeToolCall(api);
     await runBeforeToolCall(api);
 
+    // Then
     expect(clientMocks.agentsInit).toHaveBeenCalledTimes(1);
     expect(clientMocks.evaluationEvaluate).toHaveBeenCalledTimes(2);
   });
 
-  it("Given duplicate deny controls in the evaluation response, when the tool call is blocked, then the block reason lists each control once", async () => {
+  it("deduplicates deny controls in the block reason", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
     });
@@ -347,15 +384,18 @@ describe("agent-control plugin logging and blocking", () => {
       errors: null,
     });
 
+    // When
     register(api.api);
     await runBeforeToolCall(api);
 
+    // Then
     const message = String(api.warn.mock.calls[0]?.[0]);
     expect(message).toContain("alpha, beta");
     expect(message).not.toContain("alpha, alpha");
   });
 
-  it("Given no policy reason or deny controls are returned, when the tool call is blocked, then the generic block reason is logged", async () => {
+  it("logs the generic block reason when no policy details are returned", async () => {
+    // Given
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
     });
@@ -367,9 +407,11 @@ describe("agent-control plugin logging and blocking", () => {
       errors: null,
     });
 
+    // When
     register(api.api);
     await runBeforeToolCall(api);
 
+    // Then
     expect(api.warn).toHaveBeenCalledWith(
       expect.stringContaining("reason=[agent-control] blocked by policy evaluation"),
     );

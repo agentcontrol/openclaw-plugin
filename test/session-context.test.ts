@@ -39,8 +39,9 @@ beforeEach(() => {
 });
 
 describe("buildEvaluationContext", () => {
-  it("Given a Discord channel session key, when session-store metadata is unknown, then channel details are derived from the session key", async () => {
-    const context = await buildEvaluationContext({
+  it("derives channel details from the session key when store metadata is unknown", async () => {
+    // Given
+    const request = {
       api: createApi(),
       sourceAgentId: "worker-1",
       state: {
@@ -59,8 +60,12 @@ describe("buildEvaluationContext", () => {
         sessionKey: "agent:worker-1:discord:guild-1:channel-2",
       },
       failClosed: false,
-    });
+    };
 
+    // When
+    const context = await buildEvaluationContext(request);
+
+    // Then
     expect(context).toMatchObject({
       openclawAgentId: "worker-1",
       channelType: "channel",
@@ -75,7 +80,8 @@ describe("buildEvaluationContext", () => {
     });
   });
 
-  it("Given session-store metadata for a direct message, when the session key points at a group scope, then the session-store provider and type win while the key scope is retained", async () => {
+  it("prefers session-store provider and type while retaining the key scope", async () => {
+    // Given
     resolveSessionIdentityMock.mockResolvedValueOnce({
       provider: "slack",
       type: "direct",
@@ -88,7 +94,7 @@ describe("buildEvaluationContext", () => {
       source: "sessionStore",
     });
 
-    const context = await buildEvaluationContext({
+    const request = {
       api: createApi(),
       sourceAgentId: "worker-1",
       state: {
@@ -109,8 +115,12 @@ describe("buildEvaluationContext", () => {
       configuredAgentId: "configured-agent",
       configuredAgentVersion: "2026.03.20",
       pluginVersion: "test-version",
-    });
+    };
 
+    // When
+    const context = await buildEvaluationContext(request);
+
+    // Then
     expect(context).toMatchObject({
       runId: "ctx-run",
       toolCallId: "ctx-call",
@@ -139,8 +149,9 @@ describe("buildEvaluationContext", () => {
     });
   });
 
-  it("Given no parseable session key, when the context is built, then channel information falls back to unknown values", async () => {
-    const context = await buildEvaluationContext({
+  it("falls back to unknown channel information for an unparseable session key", async () => {
+    // Given
+    const request = {
       api: createApi(),
       sourceAgentId: "worker-1",
       state: {
@@ -156,8 +167,12 @@ describe("buildEvaluationContext", () => {
         sessionKey: "not-an-agent-session-key",
       },
       failClosed: false,
-    });
+    };
 
+    // When
+    const context = await buildEvaluationContext(request);
+
+    // Then
     expect(context).toMatchObject({
       channelType: "unknown",
       channelName: null,
