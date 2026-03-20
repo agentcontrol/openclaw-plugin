@@ -1,16 +1,26 @@
 # OpenClaw plugin for Agent Control
 
-[![npm version](https://img.shields.io/npm/v/agent-control-openclaw-plugin?logo=npm)](https://www.npmjs.com/package/agent-control-openclaw-plugin)
-[![Node >=24](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](https://github.com/agentcontrol/openclaw-plugin/blob/main/package.json)
-[![CI](https://github.com/agentcontrol/openclaw-plugin/actions/workflows/lint.yml/badge.svg)](https://github.com/agentcontrol/openclaw-plugin/actions/workflows/lint.yml)
-[![codecov](https://codecov.io/gh/agentcontrol/openclaw-plugin/graph/badge.svg?branch=main)](https://app.codecov.io/gh/agentcontrol/openclaw-plugin)
-
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/cat-plus-lobster-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="assets/cat-plus-lobster-light.svg">
     <img src="https://cdn.jsdelivr.net/npm/agent-control-openclaw-plugin/assets/cat-plus-lobster-light.svg" alt="Agent Control cat plus OpenClaw lobster" width="430">
   </picture>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/agent-control-openclaw-plugin">
+    <img src="https://img.shields.io/npm/v/agent-control-openclaw-plugin?logo=npm" alt="npm version">
+  </a>
+  <a href="https://github.com/agentcontrol/openclaw-plugin/blob/main/package.json">
+    <img src="https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white" alt="Node 24 or newer">
+  </a>
+  <a href="https://github.com/agentcontrol/openclaw-plugin/actions/workflows/lint.yml">
+    <img src="https://github.com/agentcontrol/openclaw-plugin/actions/workflows/lint.yml/badge.svg" alt="CI">
+  </a>
+  <a href="https://app.codecov.io/gh/agentcontrol/openclaw-plugin">
+    <img src="https://codecov.io/gh/agentcontrol/openclaw-plugin/graph/badge.svg?branch=main" alt="Codecov">
+  </a>
 </p>
 
 This plugin integrates OpenClaw with [Agent Control](https://github.com/agentcontrol/agent-control), a security and policy layer for agent tool use. It registers OpenClaw tools with Agent Control and can block unsafe tool invocations before they execute.
