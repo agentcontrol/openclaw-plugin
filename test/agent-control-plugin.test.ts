@@ -42,8 +42,6 @@ vi.mock("../src/session-context.ts", () => ({
 
 import register from "../src/agent-control-plugin.ts";
 
-const VALID_AGENT_ID = "00000000-0000-4000-8000-000000000000";
-
 type MockApi = {
   api: OpenClawPluginApi;
   handlers: Map<string, (...args: any[]) => unknown>;
@@ -151,22 +149,6 @@ describe("agent-control plugin logging and blocking", () => {
     );
   });
 
-  it("warns when the configured agent ID is not a UUID", () => {
-    // Given plugin configuration with an invalid configured agent ID
-    const api = createMockApi({
-      serverUrl: "http://localhost:8000",
-      agentId: "not-a-uuid",
-    });
-
-    // When the plugin is registered
-    register(api.api);
-
-    // Then a UUID validation warning is emitted
-    expect(api.warn).toHaveBeenCalledWith(
-      "agent-control: configured agentId is not a UUID: not-a-uuid",
-    );
-  });
-
   it("only logs the block event in warn mode for unsafe evaluations", async () => {
     // Given warn-level logging and an unsafe policy evaluation response
     const api = createMockApi({
@@ -261,33 +243,8 @@ describe("agent-control plugin logging and blocking", () => {
     );
   });
 
-  it("uses the base agent name when a fixed configured agent ID is present", async () => {
-    // Given a fixed configured agent ID and a base agent name
-    const api = createMockApi({
-      serverUrl: "http://localhost:8000",
-      agentId: VALID_AGENT_ID,
-      agentName: "base-agent",
-    });
-
-    // When a source agent evaluates a tool call
-    register(api.api);
-    await runBeforeToolCall(api, {}, { agentId: "worker-1" });
-
-    // Then Agent Control receives the base agent name without a source suffix
-    expect(clientMocks.agentsInit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: expect.objectContaining({
-          agentName: "base-agent",
-          agentMetadata: expect.objectContaining({
-            openclawConfiguredAgentId: VALID_AGENT_ID,
-          }),
-        }),
-      }),
-    );
-  });
-
-  it("appends the source agent ID when no configured agent ID is present", async () => {
-    // Given a base agent name without a fixed configured agent ID
+  it("appends the source agent ID to the base agent name", async () => {
+    // Given a base agent name
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
       agentName: "base-agent",

@@ -112,7 +112,6 @@ describe("buildEvaluationContext", () => {
         toolCallId: "ctx-call",
       },
       failClosed: true,
-      configuredAgentId: "configured-agent",
       configuredAgentVersion: "2026.03.20",
       pluginVersion: "test-version",
     };
@@ -129,7 +128,6 @@ describe("buildEvaluationContext", () => {
       senderFrom: "alice@example.com",
       policy: {
         failClosed: true,
-        configuredAgentId: "configured-agent",
         configuredAgentVersion: "2026.03.20",
       },
       sync: {

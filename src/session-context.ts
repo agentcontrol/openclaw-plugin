@@ -80,7 +80,6 @@ export async function buildEvaluationContext(params: {
   };
   pluginVersion?: string;
   failClosed: boolean;
-  configuredAgentId?: string;
   configuredAgentVersion?: string;
 }): Promise<Record<string, unknown>> {
   const channelFromSessionKey = deriveChannelContext(params.ctx.sessionKey);
@@ -122,7 +121,6 @@ export async function buildEvaluationContext(params: {
     },
     policy: {
       failClosed: params.failClosed,
-      configuredAgentId: params.configuredAgentId ?? null,
       configuredAgentVersion: params.configuredAgentVersion ?? null,
     },
     sync: {
