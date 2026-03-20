@@ -1,6 +1,6 @@
 import { AgentControlClient } from "agent-control";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
-import { createPluginLogger } from "./logging.ts";
+import { createPluginLogger, resolveLogLevel } from "./logging.ts";
 import { resolveStepsForContext } from "./tool-catalog.ts";
 import { buildEvaluationContext } from "./session-context.ts";
 import {
@@ -64,7 +64,7 @@ export default function register(api: OpenClawPluginApi) {
   if (cfg.enabled === false) {
     return;
   }
-  const logger = createPluginLogger(api.logger, cfg.debug === true);
+  const logger = createPluginLogger(api.logger, resolveLogLevel(cfg));
 
   const serverUrl = asString(cfg.serverUrl) ?? asString(process.env.AGENT_CONTROL_SERVER_URL);
   if (!serverUrl) {
@@ -95,7 +95,7 @@ export default function register(api: OpenClawPluginApi) {
     timeoutMs: clientTimeoutMs,
     userAgent: asString(cfg.userAgent) ?? "openclaw-agent-control-plugin/0.1",
   });
-  logger.debug(
+  logger.info(
     `agent-control: client_init duration_sec=${secondsSince(clientInitStartedAt)} timeout_ms=${clientTimeoutMs ?? "default"} server_url=${serverUrl}`,
   );
 
@@ -132,7 +132,7 @@ export default function register(api: OpenClawPluginApi) {
 
     const warmupStartedAt = process.hrtime.bigint();
     gatewayWarmupStatus = "running";
-    logger.debug(`agent-control: gateway_boot_warmup started agent=${BOOT_WARMUP_AGENT_ID}`);
+    logger.info(`agent-control: gateway_boot_warmup started agent=${BOOT_WARMUP_AGENT_ID}`);
 
     // Warm the exact resolver path used during tool evaluation so the gateway
     // process retains the expensive module graph in memory after startup.
@@ -143,7 +143,7 @@ export default function register(api: OpenClawPluginApi) {
     })
       .then((steps) => {
         gatewayWarmupStatus = "done";
-        logger.debug(
+        logger.info(
           `agent-control: gateway_boot_warmup done duration_sec=${secondsSince(warmupStartedAt)} agent=${BOOT_WARMUP_AGENT_ID} steps=${steps.length}`,
         );
       })
@@ -168,6 +168,7 @@ export default function register(api: OpenClawPluginApi) {
 
     const currentHash = state.stepsHash;
     const promise = (async () => {
+      const syncStartedAt = process.hrtime.bigint();
       await client.agents.init({
         agent: {
           agentName: state.agentName,
@@ -181,6 +182,9 @@ export default function register(api: OpenClawPluginApi) {
         },
         steps: state.steps,
       });
+      logger.info(
+        `agent-control: sync_agent duration_sec=${secondsSince(syncStartedAt)} agent=${state.sourceAgentId} step_count=${state.steps.length}`,
+      );
       state.lastSyncedStepsHash = currentHash;
     })().finally(() => {
       state.syncPromise = null;
