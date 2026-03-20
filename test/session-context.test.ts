@@ -40,7 +40,7 @@ beforeEach(() => {
 
 describe("buildEvaluationContext", () => {
   it("derives channel details from the session key when store metadata is unknown", async () => {
-    // Given
+    // Given a request with a Discord channel session key and no session-store identity
     const request = {
       api: createApi(),
       sourceAgentId: "worker-1",
@@ -62,10 +62,10 @@ describe("buildEvaluationContext", () => {
       failClosed: false,
     };
 
-    // When
+    // When the evaluation context is built
     const context = await buildEvaluationContext(request);
 
-    // Then
+    // Then channel metadata is derived directly from the session key
     expect(context).toMatchObject({
       openclawAgentId: "worker-1",
       channelType: "channel",
@@ -81,7 +81,7 @@ describe("buildEvaluationContext", () => {
   });
 
   it("prefers session-store provider and type while retaining the key scope", async () => {
-    // Given
+    // Given direct-message identity from the session store and a group-scoped session key
     resolveSessionIdentityMock.mockResolvedValueOnce({
       provider: "slack",
       type: "direct",
@@ -117,10 +117,10 @@ describe("buildEvaluationContext", () => {
       pluginVersion: "test-version",
     };
 
-    // When
+    // When the evaluation context is built
     const context = await buildEvaluationContext(request);
 
-    // Then
+    // Then provider and channel type come from the store while scope stays from the key
     expect(context).toMatchObject({
       runId: "ctx-run",
       toolCallId: "ctx-call",
@@ -150,7 +150,7 @@ describe("buildEvaluationContext", () => {
   });
 
   it("falls back to unknown channel information for an unparseable session key", async () => {
-    // Given
+    // Given a request whose session key does not match the expected agent format
     const request = {
       api: createApi(),
       sourceAgentId: "worker-1",
@@ -169,10 +169,10 @@ describe("buildEvaluationContext", () => {
       failClosed: false,
     };
 
-    // When
+    // When the evaluation context is built
     const context = await buildEvaluationContext(request);
 
-    // Then
+    // Then channel-related fields fall back to unknown values
     expect(context).toMatchObject({
       channelType: "unknown",
       channelName: null,

@@ -27,6 +27,7 @@ Coverage output is written to `coverage/`, including `coverage/lcov.info` for Co
 - Prefer behavioral tests over implementation-detail tests.
 - Write test names as concise behavioral summaries.
 - Express Given/When/Then structure as code comments inside the test body.
+- Make each Given/When/Then comment descriptive. Do not use placeholder comments like `// Given`, `// When`, or `// Then` by themselves.
 - Use Vitest for unit and integration-style tests.
 - Assert externally visible outcomes first: return values, registered hooks, emitted logs, blocked tool calls, resolved context, and client calls.
 - Mock boundary dependencies such as `agent-control`, session/context helpers, and runtime-loading edges when needed, but keep the assertions focused on plugin behavior.
@@ -36,6 +37,12 @@ Examples of the preferred naming style:
 
 - `it("defaults to warn", () => { ... })`
 - `it("blocks the tool call when fail-closed sync fails", async () => { ... })`
+
+Examples of the preferred comment style:
+
+- `// Given no logging configuration is provided`
+- `// When the effective log level is resolved`
+- `// Then warn mode is selected by default`
 
 ## Project Conventions
 
