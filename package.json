@@ -26,6 +26,9 @@
     "LICENSE"
   ],
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
