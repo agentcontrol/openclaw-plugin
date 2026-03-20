@@ -12,9 +12,6 @@ export function resolveLogLevel(cfg: AgentControlPluginConfig): LogLevel {
   if (configuredLevel && isLogLevel(configuredLevel)) {
     return configuredLevel;
   }
-  if (cfg.debug === true) {
-    return "debug";
-  }
   return "warn";
 }
 

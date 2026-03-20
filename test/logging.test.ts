@@ -26,28 +26,6 @@ describe("resolveLogLevel", () => {
     expect(infoLevel).toBe("info");
     expect(debugLevel).toBe("debug");
   });
-
-  it("prefers logLevel over the deprecated debug flag", () => {
-    // Given both a logLevel value and the deprecated debug flag
-    const config = { logLevel: "warn", debug: true } as const;
-
-    // When the effective log level is resolved
-    const level = resolveLogLevel(config);
-
-    // Then the explicit logLevel takes precedence
-    expect(level).toBe("warn");
-  });
-
-  it("falls back to debug for deprecated compatibility", () => {
-    // Given an invalid logLevel alongside debug compatibility mode
-    const config = { logLevel: "verbose" as never, debug: true };
-
-    // When the effective log level is resolved
-    const level = resolveLogLevel(config);
-
-    // Then debug mode is used as the compatibility fallback
-    expect(level).toBe("debug");
-  });
 });
 
 describe("createPluginLogger", () => {
