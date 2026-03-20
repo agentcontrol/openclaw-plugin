@@ -35,6 +35,9 @@ Then restart the gateway.
 
 ```bash
 npm install
+npm run lint
+npm run typecheck
+npm test
 ```
 
 3. Link it into your OpenClaw config from your OpenClaw checkout:

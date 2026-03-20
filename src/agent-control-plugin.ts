@@ -18,8 +18,8 @@ import {
 import type { AgentControlPluginConfig, AgentState } from "./types.ts";
 
 function collectDenyControlNames(response: {
-  matches?: Array<{ action?: string; controlName?: string }>;
-  errors?: Array<{ action?: string; controlName?: string }>;
+  matches?: Array<{ action?: string; controlName?: string }> | null;
+  errors?: Array<{ action?: string; controlName?: string }> | null;
 }): string[] {
   const names: string[] = [];
   for (const match of [...(response.matches ?? []), ...(response.errors ?? [])]) {
@@ -36,8 +36,8 @@ function collectDenyControlNames(response: {
 
 function buildBlockReason(response: {
   reason?: string | null;
-  matches?: Array<{ action?: string; controlName?: string }>;
-  errors?: Array<{ action?: string; controlName?: string }>;
+  matches?: Array<{ action?: string; controlName?: string }> | null;
+  errors?: Array<{ action?: string; controlName?: string }> | null;
 }): string {
   const denyControls = collectDenyControlNames(response);
   if (denyControls.length > 0) {

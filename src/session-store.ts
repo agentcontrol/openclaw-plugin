@@ -148,11 +148,13 @@ export async function resolveSessionIdentity(
     const sessionCfg = isRecord(cfg.session) ? cfg.session : undefined;
     const storePath = internals.resolveStorePath(asString(sessionCfg?.store));
     const store = internals.loadSessionStore(storePath);
-    const entry =
-      (isRecord(store[normalizedKey]) ? store[normalizedKey] : undefined) ??
-      (isRecord(store[resolveBaseSessionKey(normalizedKey)])
-        ? store[resolveBaseSessionKey(normalizedKey)]
-        : undefined);
+    const directEntry = store[normalizedKey];
+    const baseEntry = store[resolveBaseSessionKey(normalizedKey)];
+    const entry: Record<string, unknown> | undefined = isRecord(directEntry)
+      ? directEntry
+      : isRecord(baseEntry)
+        ? baseEntry
+        : undefined;
     const data = entry ? readSessionIdentityFromEntry(entry) : unknownSessionIdentity();
     setSessionMetadataCache(normalizedKey, data);
     return data;
