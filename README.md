@@ -30,7 +30,8 @@ This plugin integrates OpenClaw with [Agent Control](https://github.com/agentcon
 
 - Enforce policy before tool execution, so unsafe or disallowed actions never run.
 - Carry session and channel context into evaluations, so policies can reason about where a request came from and how the agent is being used.
-  - Example: Only allow an allowlist of tools in slack channels, but allow fully if DM from an approved user.
+  - Example: Only allow specific tools in slack channels, but allow fully if DM from an approved user.
+    - Allow read tool, but only from an allowlist of paths. 
 - Policies can be updated and propagated to your OpenClaw without having to reboot the gateway.
 
 ## How it works
