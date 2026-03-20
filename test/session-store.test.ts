@@ -45,7 +45,7 @@ async function loadSessionStoreModule(fixture: SessionStoreFixture = {}) {
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.unmock("../src/openclaw-runtime.ts");
+  vi.doUnmock("../src/openclaw-runtime.ts");
 });
 
 describe("resolveSessionIdentity", () => {

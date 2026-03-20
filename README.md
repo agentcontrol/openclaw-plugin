@@ -38,7 +38,10 @@ npm install
 npm run lint
 npm run typecheck
 npm test
+npm run coverage
 ```
+
+Coverage reports are written to `coverage/`, including `coverage/lcov.info` for Codecov-compatible uploads. The GitHub Actions workflow will upload that report to Codecov automatically when a `CODECOV_TOKEN` secret is configured for the repository.
 
 3. Link it into your OpenClaw config from your OpenClaw checkout:
 

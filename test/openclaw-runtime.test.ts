@@ -25,8 +25,8 @@ async function loadRuntimeModule(options: { packageResolve?: string | Error } = 
 
 afterEach(() => {
   process.chdir(originalCwd);
-  vi.unmock("node:module");
-  vi.unmock("../src/openclaw-runtime.ts");
+  vi.doUnmock("node:module");
+  vi.doUnmock("../src/openclaw-runtime.ts");
 });
 
 describe("openclaw runtime helpers", () => {

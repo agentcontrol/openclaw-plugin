@@ -78,7 +78,7 @@ function createLogger() {
 }
 
 afterEach(() => {
-  vi.unmock("../src/openclaw-runtime.ts");
+  vi.doUnmock("../src/openclaw-runtime.ts");
 });
 
 describe("resolveStepsForContext", () => {
