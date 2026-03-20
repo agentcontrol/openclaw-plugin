@@ -216,11 +216,11 @@ describe("agent-control plugin logging and blocking", () => {
     expect(messages.some((message) => message.includes("evaluated agent="))).toBe(false);
   });
 
-  it("emits verbose traces when the deprecated debug flag is enabled", async () => {
-    // Given the deprecated debug flag enabled in plugin configuration
+  it("emits verbose traces when debug log level is enabled", async () => {
+    // Given debug log level enabled in plugin configuration
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
-      debug: true,
+      logLevel: "debug",
     });
 
     // When the plugin evaluates a tool call

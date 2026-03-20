@@ -13,7 +13,6 @@ export type AgentControlPluginConfig = {
   userAgent?: string;
   failClosed?: boolean;
   logLevel?: LogLevel;
-  debug?: boolean;
 };
 
 export type AgentControlStep = {
