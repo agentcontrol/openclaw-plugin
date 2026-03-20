@@ -8,7 +8,6 @@
   </picture>
 </p>
 
-<p align="center">
   <a href="https://www.npmjs.com/package/agent-control-openclaw-plugin">
     <img src="https://img.shields.io/npm/v/agent-control-openclaw-plugin?logo=npm" alt="npm version">
   </a>
@@ -21,7 +20,6 @@
   <a href="https://app.codecov.io/gh/agentcontrol/openclaw-plugin">
     <img src="https://codecov.io/gh/agentcontrol/openclaw-plugin/graph/badge.svg?branch=main" alt="Codecov">
   </a>
-</p>
 
 This plugin integrates OpenClaw with [Agent Control](https://github.com/agentcontrol/agent-control), a security and policy layer for agent tool use. It registers OpenClaw tools with Agent Control and can block unsafe tool invocations before they execute.
 
