@@ -2,26 +2,26 @@ import { describe, expect, it, vi } from "vitest";
 import { createPluginLogger, resolveLogLevel } from "../src/logging.ts";
 
 describe("resolveLogLevel", () => {
-  it("defaults to warn", () => {
+  it("Given no logging configuration, when the log level is resolved, then warn is used", () => {
     expect(resolveLogLevel({})).toBe("warn");
   });
 
-  it("uses an explicit logLevel when provided", () => {
+  it("Given an explicit log level, when the log level is resolved, then the configured level is used", () => {
     expect(resolveLogLevel({ logLevel: "info" })).toBe("info");
     expect(resolveLogLevel({ logLevel: "debug" })).toBe("debug");
   });
 
-  it("lets logLevel override the deprecated debug flag", () => {
+  it("Given both logLevel and the deprecated debug flag, when the log level is resolved, then logLevel wins", () => {
     expect(resolveLogLevel({ logLevel: "warn", debug: true })).toBe("warn");
   });
 
-  it("falls back to the deprecated debug flag when logLevel is invalid", () => {
+  it("Given an invalid logLevel and debug=true, when the log level is resolved, then debug is used as a compatibility fallback", () => {
     expect(resolveLogLevel({ logLevel: "verbose" as never, debug: true })).toBe("debug");
   });
 });
 
 describe("createPluginLogger", () => {
-  it("only emits warnings in warn mode", () => {
+  it("Given warn mode, when info and debug messages are emitted, then only warning-class messages are forwarded", () => {
     const info = vi.fn();
     const warn = vi.fn();
     const logger = createPluginLogger({ info, warn }, "warn");
@@ -35,7 +35,7 @@ describe("createPluginLogger", () => {
     expect(warn.mock.calls).toEqual([["warn"], ["block"]]);
   });
 
-  it("emits info logs in info mode but still suppresses debug traces", () => {
+  it("Given info mode, when info and debug messages are emitted, then lifecycle info is forwarded and debug traces stay suppressed", () => {
     const info = vi.fn();
     const warn = vi.fn();
     const logger = createPluginLogger({ info, warn }, "info");
@@ -47,7 +47,7 @@ describe("createPluginLogger", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("emits both info and debug logs in debug mode", () => {
+  it("Given debug mode, when info and debug messages are emitted, then both are forwarded", () => {
     const info = vi.fn();
     const warn = vi.fn();
     const logger = createPluginLogger({ info, warn }, "debug");
