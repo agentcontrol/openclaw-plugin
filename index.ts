@@ -1,1 +1,1 @@
-export { default } from "./src/agent-control-plugin.ts";
+export { default } from "./src/plugin-entry.ts";
