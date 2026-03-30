@@ -1,6 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 
 export type LogLevel = "warn" | "info" | "debug";
+export type SteerBehavior = "requireApproval" | "block";
 
 export type AgentControlPluginConfig = {
   enabled?: boolean;
@@ -12,6 +13,7 @@ export type AgentControlPluginConfig = {
   userAgent?: string;
   failClosed?: boolean;
   logLevel?: LogLevel;
+  steerBehavior?: SteerBehavior;
 };
 
 export type AgentControlStep = {

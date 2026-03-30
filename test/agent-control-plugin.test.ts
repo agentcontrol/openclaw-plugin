@@ -176,6 +176,120 @@ describe("agent-control plugin logging and blocking", () => {
     expect(clientMocks.evaluationEvaluate).toHaveBeenCalledOnce();
   });
 
+  it("requires approval when a steer control matches", async () => {
+    // Given the default steer behavior and an unsafe steer evaluation response
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: false,
+      reason: "top-level reason",
+      matches: [
+        {
+          action: "steer",
+          controlName: "shell-review",
+          steeringContext: {
+            message: "Review the command before running it.",
+          },
+        },
+      ],
+      errors: null,
+    });
+
+    // When the plugin evaluates the tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the tool call requires operator approval with the steering guidance
+    expect(result).toEqual({
+      requireApproval: {
+        title: "Agent Control approval required",
+        description:
+          'Tool call "shell" matched steering control(s): shell-review. Guidance: Review the command before running it.',
+        severity: "warning",
+        timeoutMs: 120_000,
+        timeoutBehavior: "deny",
+      },
+    });
+    expect(api.warn).toHaveBeenCalledWith(
+      expect.stringContaining("approval_required tool=shell agent=default"),
+    );
+  });
+
+  it("blocks steer results when steerBehavior is block", async () => {
+    // Given steer handling is configured to block immediately
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+      steerBehavior: "block",
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: false,
+      matches: [
+        {
+          action: "steer",
+          controlName: "shell-review",
+          steeringContext: {
+            message: "Review the command before running it.",
+          },
+        },
+      ],
+      errors: null,
+    });
+
+    // When the plugin evaluates the tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the tool call is blocked instead of requesting approval
+    expect(result).toEqual({
+      block: true,
+      blockReason: USER_BLOCK_MESSAGE,
+    });
+    expect(api.warn).toHaveBeenCalledWith(
+      expect.stringContaining("policy_action=steer"),
+    );
+  });
+
+  it("blocks deny matches even when steer matches are also present", async () => {
+    // Given an unsafe evaluation response containing both deny and steer results
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: false,
+      matches: [
+        {
+          action: "steer",
+          controlName: "shell-review",
+          steeringContext: {
+            message: "Review the command before running it.",
+          },
+        },
+        {
+          action: "deny",
+          controlName: "shell-deny",
+        },
+      ],
+      errors: null,
+    });
+
+    // When the plugin evaluates the tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the deny result wins and the tool call is blocked
+    expect(result).toEqual({
+      block: true,
+      blockReason: USER_BLOCK_MESSAGE,
+    });
+    expect(api.warn).toHaveBeenCalledWith(
+      expect.stringContaining("blocked by deny control(s): shell-deny"),
+    );
+  });
+
   it("emits lifecycle logs without debug traces in info mode", async () => {
     // Given info-level logging for a plugin that can warm up and evaluate tools
     const api = createMockApi({
@@ -351,6 +465,151 @@ describe("agent-control plugin logging and blocking", () => {
     expect(message).not.toContain("alpha, alpha");
   });
 
+  it("deduplicates steer controls in the approval description", async () => {
+    // Given an unsafe steer response with duplicate control names
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: false,
+      matches: [
+        {
+          action: "steer",
+          controlName: "alpha",
+          steeringContext: {
+            message: "Review the command before running it.",
+          },
+        },
+        {
+          action: "steer",
+          controlName: "alpha",
+          steeringContext: {
+            message: "Review the command before running it.",
+          },
+        },
+        {
+          action: "steer",
+          controlName: "beta",
+          steeringContext: {
+            message: "Review the command before running it.",
+          },
+        },
+      ],
+      errors: null,
+    });
+
+    // When the plugin evaluates the tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the approval description lists each steer control name only once
+    expect(result).toEqual({
+      requireApproval: expect.objectContaining({
+        description:
+          'Tool call "shell" matched steering control(s): alpha, beta. Guidance: Review the command before running it.',
+      }),
+    });
+  });
+
+  it("prefers the evaluation reason when steer guidance is missing", async () => {
+    // Given a steer response without per-control steering guidance
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: false,
+      reason: "Operator review is required for this command.",
+      matches: [
+        {
+          action: "steer",
+          controlName: "shell-review",
+          steeringContext: null,
+        },
+      ],
+      errors: null,
+    });
+
+    // When the plugin evaluates the tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the approval description falls back to the top-level evaluation reason
+    expect(result).toEqual({
+      requireApproval: expect.objectContaining({
+        description:
+          'Tool call "shell" matched steering control(s): shell-review. Guidance: Operator review is required for this command.',
+      }),
+    });
+  });
+
+  it("falls back to generic guidance when steer details are missing", async () => {
+    // Given a steer response without control guidance or a top-level reason
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: false,
+      reason: "",
+      matches: [
+        {
+          action: "steer",
+          controlName: "shell-review",
+          steeringContext: {
+            message: "",
+          },
+        },
+      ],
+      errors: null,
+    });
+
+    // When the plugin evaluates the tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the generic steering guidance is used in the approval description
+    expect(result).toEqual({
+      requireApproval: expect.objectContaining({
+        description:
+          'Tool call "shell" matched steering control(s): shell-review. Guidance: Tool call requires operator approval due to steering policy.',
+      }),
+    });
+  });
+
+  it("does not treat evaluator errors as steer triggers", async () => {
+    // Given an unsafe evaluation response with a steer action only in errors
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: false,
+      reason: "",
+      matches: null,
+      errors: [
+        {
+          action: "steer",
+          controlName: "shell-review",
+        },
+      ],
+    });
+
+    // When the plugin evaluates the tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the plugin falls back to a generic block instead of requesting approval
+    expect(result).toEqual({
+      block: true,
+      blockReason: USER_BLOCK_MESSAGE,
+    });
+    expect(api.warn).toHaveBeenCalledWith(
+      expect.stringContaining("reason=[agent-control] blocked by policy evaluation"),
+    );
+  });
+
   it("logs the generic block reason when no policy details are returned", async () => {
     // Given an unsafe evaluation response with no policy reason or deny controls
     const api = createMockApi({
@@ -366,9 +625,13 @@ describe("agent-control plugin logging and blocking", () => {
 
     // When the tool call is evaluated and blocked
     register(api.api);
-    await runBeforeToolCall(api);
+    const result = await runBeforeToolCall(api);
 
-    // Then the generic policy block reason is logged
+    // Then the tool call is blocked with the generic policy block reason logged
+    expect(result).toEqual({
+      block: true,
+      blockReason: USER_BLOCK_MESSAGE,
+    });
     expect(api.warn).toHaveBeenCalledWith(
       expect.stringContaining("reason=[agent-control] blocked by policy evaluation"),
     );
