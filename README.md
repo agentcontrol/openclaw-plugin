@@ -25,6 +25,8 @@ This plugin integrates OpenClaw with [Agent Control](https://github.com/agentcon
 
 > [!WARNING]
 > Experimental plugin: this may break across OpenClaw updates. Use in non-production or pinned environments.
+>
+> The package exports a modern `definePluginEntry(...)` descriptor when the host SDK exposes it, and falls back to the legacy raw `register(api)` export on older gateways.
 
 ## Why use this?
 
