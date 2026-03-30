@@ -36,7 +36,7 @@ This plugin integrates OpenClaw with [Agent Control](https://github.com/agentcon
 
 ## How it works
 
-When the gateway starts, the plugin loads the OpenClaw tool catalog and syncs it to Agent Control. On every tool call, the plugin intercepts the invocation through a `before_tool_call` hook, builds an evaluation context (session, channel, provider, agent identity), and sends it to Agent Control for a policy decision. If the evaluation comes back safe the call proceeds normally. If it comes back denied the call is blocked and the user sees a rejection message. If it comes back with a `steer` action, the plugin can either require operator approval or block immediately, depending on `steerBehavior`.
+When the gateway starts, the plugin loads the OpenClaw tool catalog and syncs it to Agent Control. On every tool call, the plugin intercepts the invocation through a `before_tool_call` hook, builds an evaluation context (session, channel, provider, agent identity), and sends it to Agent Control for a policy decision. If the evaluation comes back safe the call proceeds normally. If it comes back denied the call is blocked and the user sees a rejection message. If it comes back with a `steer` action, the plugin can either require operator approval or block immediately, depending on `steerBehavior`. When `steerBehavior=requireApproval`, the `exec` tool is routed into OpenClaw's native exec approval flow by forcing `ask=always`, while other tools use plugin approval requests.
 
 The plugin handles multiple agents, tracks tool catalog changes between calls, and re-syncs automatically when the catalog drifts.
 
@@ -70,7 +70,7 @@ openclaw config set plugins.entries.agent-control-openclaw-plugin.config.apiKey 
 | `timeoutMs` | integer | SDK default | Client timeout in milliseconds. |
 | `failClosed` | boolean | `false` | Block tool calls when Agent Control is unreachable. See [Fail-open vs fail-closed](#fail-open-vs-fail-closed). |
 | `logLevel` | string | `warn` | Logging verbosity. See [Logging](#logging). |
-| `steerBehavior` | string | `requireApproval` | How Agent Control `steer` results for tool calls are handled: `requireApproval` asks an operator to approve within 2 minutes, `block` rejects immediately. |
+| `steerBehavior` | string | `requireApproval` | How Agent Control `steer` results for tool calls are handled: `requireApproval` uses OpenClaw approvals, with native exec approval for `exec` and plugin approval requests for other tools; `block` rejects immediately. |
 | `userAgent` | string | `openclaw-agent-control-plugin/0.1` | Custom User-Agent header for requests to Agent Control. |
 
 All settings are configured through the OpenClaw CLI:
@@ -102,7 +102,7 @@ openclaw config set plugins.entries.agent-control-openclaw-plugin.config.failClo
 
 ## Steering behavior
 
-By default, the plugin maps Agent Control `steer` results for tool calls to OpenClaw approval requests. OpenClaw will wait up to 2 minutes for an operator decision and deny the call on timeout or when approval is unavailable.
+By default, the plugin maps Agent Control `steer` results for tool calls to OpenClaw approvals. For `exec`, the plugin forces `ask=always` so the command goes through OpenClaw's native exec approval flow in the originating session. For other tools, the plugin uses OpenClaw plugin approval requests and waits up to 2 minutes for an operator decision before denying on timeout or when approval is unavailable.
 
 ```bash
 openclaw config set plugins.entries.agent-control-openclaw-plugin.config.steerBehavior "requireApproval"

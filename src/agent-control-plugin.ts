@@ -19,6 +19,8 @@ import type { AgentControlPluginConfig, AgentState, SteerBehavior } from "./type
 const APPROVAL_TITLE = "Agent Control approval required";
 const APPROVAL_TIMEOUT_MS = 120_000;
 const DEFAULT_STEER_GUIDANCE = "Tool call requires operator approval due to steering policy.";
+const EXEC_TOOL_NAME = "exec";
+const EXEC_STEER_ASK_MODE = "always";
 
 type PolicyMatch = {
   action?: string | null;
@@ -118,6 +120,12 @@ function buildApprovalDescription(toolName: string, response: PolicyResponse): s
       ? `matched steering control(s): ${steerControls.join(", ")}`
       : "matched a steering policy";
   return `Tool call "${toolName}" ${controlSummary}. Guidance: ${guidance}`;
+}
+
+function buildNativeExecApprovalParams(): Record<string, string> {
+  return {
+    ask: EXEC_STEER_ASK_MODE,
+  };
 }
 
 function resolveSourceAgentId(agentId: string | undefined): string {
@@ -398,6 +406,14 @@ export default function register(api: OpenClawPluginApi) {
           }
 
           const description = buildApprovalDescription(event.toolName, evaluation);
+          if (event.toolName === EXEC_TOOL_NAME) {
+            logger.warn(
+              `agent-control: exec_native_approval_required tool=${event.toolName} agent=${sourceAgentId} reason=${description} ask=${EXEC_STEER_ASK_MODE} policy_action=steer`,
+            );
+            return {
+              params: buildNativeExecApprovalParams(),
+            };
+          }
           logger.warn(
             `agent-control: approval_required tool=${event.toolName} agent=${sourceAgentId} reason=${description}`,
           );

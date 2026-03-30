@@ -64,7 +64,7 @@
     },
     "steerBehavior": {
       "label": "Steer Behavior",
-      "help": "Controls how Agent Control steer decisions are handled for tool calls. requireApproval asks an operator to approve the tool call; block rejects it immediately."
+      "help": "Controls how Agent Control steer decisions are handled for tool calls. requireApproval uses OpenClaw approvals, routing exec through native exec approval and other tools through plugin approvals; block rejects immediately."
     }
   }
 }

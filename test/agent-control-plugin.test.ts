@@ -219,6 +219,50 @@ describe("agent-control plugin logging and blocking", () => {
     );
   });
 
+  it("forces native exec approval when a steer control matches exec", async () => {
+    // Given the default steer behavior and a steered exec tool call
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: false,
+      matches: [
+        {
+          action: "steer",
+          controlName: "exec-review",
+          steeringContext: {
+            message: "Ask before running this command.",
+          },
+        },
+      ],
+      errors: null,
+    });
+
+    // When the plugin evaluates the exec tool call
+    register(api.api);
+    const result = await runBeforeToolCall(
+      api,
+      {
+        toolName: "exec",
+        params: { command: "ls -la /" },
+      },
+      {},
+    );
+
+    // Then the plugin forces OpenClaw's native exec approval flow through ask=always
+    expect(result).toEqual({
+      params: {
+        ask: "always",
+      },
+    });
+    expect(api.warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "exec_native_approval_required tool=exec agent=default",
+      ),
+    );
+  });
+
   it("logs the approval resolution when OpenClaw resolves a steer approval", async () => {
     // Given a steer evaluation response that returns a plugin approval request
     const api = createMockApi({
