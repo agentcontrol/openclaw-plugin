@@ -14,30 +14,69 @@ import {
   trimToMax,
   USER_BLOCK_MESSAGE,
 } from "./shared.ts";
-import type { AgentControlPluginConfig, AgentState } from "./types.ts";
+import type { AgentControlPluginConfig, AgentState, SteerBehavior } from "./types.ts";
 
-function collectDenyControlNames(response: {
-  matches?: Array<{ action?: string; controlName?: string }> | null;
-  errors?: Array<{ action?: string; controlName?: string }> | null;
-}): string[] {
+const APPROVAL_TITLE = "Agent Control approval required";
+const APPROVAL_TIMEOUT_MS = 120_000;
+const DEFAULT_STEER_GUIDANCE = "Tool call requires operator approval due to steering policy.";
+const EXEC_TOOL_NAME = "exec";
+const EXEC_STEER_ASK_MODE = "always";
+
+type PolicyMatch = {
+  action?: string | null;
+  controlName?: string | null;
+  steeringContext?: {
+    message?: string | null;
+  } | null;
+};
+
+type PolicyResponse = {
+  reason?: string | null;
+  matches?: PolicyMatch[] | null;
+  errors?: PolicyMatch[] | null;
+};
+
+function hasPolicyAction(
+  response: PolicyResponse,
+  action: "deny" | "steer",
+  includeErrors: boolean,
+): boolean {
+  const entries = includeErrors
+    ? [...(response.matches ?? []), ...(response.errors ?? [])]
+    : [...(response.matches ?? [])];
+  return entries.some((entry) => entry.action === action);
+}
+
+function collectControlNames(
+  entries: PolicyMatch[],
+  action: "deny" | "steer",
+): string[] {
   const names: string[] = [];
-  for (const match of [...(response.matches ?? []), ...(response.errors ?? [])]) {
+  for (const entry of entries) {
     if (
-      match.action === "deny" &&
-      typeof match.controlName === "string" &&
-      match.controlName.trim()
+      entry.action === action &&
+      typeof entry.controlName === "string" &&
+      entry.controlName.trim()
     ) {
-      names.push(match.controlName.trim());
+      names.push(entry.controlName.trim());
     }
   }
   return [...new Set(names)];
 }
 
-function buildBlockReason(response: {
-  reason?: string | null;
-  matches?: Array<{ action?: string; controlName?: string }> | null;
-  errors?: Array<{ action?: string; controlName?: string }> | null;
-}): string {
+function collectDenyControlNames(response: PolicyResponse): string[] {
+  return collectControlNames([...(response.matches ?? []), ...(response.errors ?? [])], "deny");
+}
+
+function collectSteerMatches(response: PolicyResponse): PolicyMatch[] {
+  return (response.matches ?? []).filter((match) => match.action === "steer");
+}
+
+function collectSteerControlNames(response: PolicyResponse): string[] {
+  return collectControlNames(collectSteerMatches(response), "steer");
+}
+
+function buildBlockReason(response: PolicyResponse): string {
   const denyControls = collectDenyControlNames(response);
   if (denyControls.length > 0) {
     return `[agent-control] blocked by deny control(s): ${denyControls.join(", ")}`;
@@ -46,6 +85,47 @@ function buildBlockReason(response: {
     return `[agent-control] ${response.reason.trim()}`;
   }
   return "[agent-control] blocked by policy evaluation";
+}
+
+function resolveSteerGuidance(response: PolicyResponse): string {
+  for (const match of collectSteerMatches(response)) {
+    const steeringMessage = asString(match.steeringContext?.message)?.trim();
+    if (steeringMessage) {
+      return steeringMessage;
+    }
+  }
+
+  const reason = asString(response.reason)?.trim();
+  if (reason) {
+    return reason;
+  }
+
+  return DEFAULT_STEER_GUIDANCE;
+}
+
+function buildSteerReason(response: PolicyResponse): string {
+  const steerControls = collectSteerControlNames(response);
+  const guidance = resolveSteerGuidance(response);
+  if (steerControls.length > 0) {
+    return `[agent-control] blocked by steer control(s): ${steerControls.join(", ")}; guidance: ${guidance}`;
+  }
+  return `[agent-control] ${guidance}`;
+}
+
+function buildApprovalDescription(toolName: string, response: PolicyResponse): string {
+  const steerControls = collectSteerControlNames(response);
+  const guidance = resolveSteerGuidance(response);
+  const controlSummary =
+    steerControls.length > 0
+      ? `matched steering control(s): ${steerControls.join(", ")}`
+      : "matched a steering policy";
+  return `Tool call "${toolName}" ${controlSummary}. Guidance: ${guidance}`;
+}
+
+function buildNativeExecApprovalParams(): Record<string, string> {
+  return {
+    ask: EXEC_STEER_ASK_MODE,
+  };
 }
 
 function resolveSourceAgentId(agentId: string | undefined): string {
@@ -78,6 +158,7 @@ export default function register(api: OpenClawPluginApi) {
   const configuredAgentVersion = asString(cfg.agentVersion);
   const pluginVersion = asString(api.version);
   const clientTimeoutMs = asPositiveInt(cfg.timeoutMs);
+  const steerBehavior: SteerBehavior = cfg.steerBehavior === "block" ? "block" : "requireApproval";
 
   const clientInitStartedAt = process.hrtime.bigint();
   const client = new AgentControlClient();
@@ -301,6 +382,55 @@ export default function register(api: OpenClawPluginApi) {
 
         if (evaluation.isSafe) {
           return;
+        }
+
+        if (hasPolicyAction(evaluation, "deny", true)) {
+          logger.block(
+            `agent-control: blocked tool=${event.toolName} agent=${sourceAgentId} reason=${buildBlockReason(evaluation)}`,
+          );
+          return {
+            block: true,
+            blockReason: USER_BLOCK_MESSAGE,
+          };
+        }
+
+        if (hasPolicyAction(evaluation, "steer", false)) {
+          if (steerBehavior === "block") {
+            logger.block(
+              `agent-control: blocked tool=${event.toolName} agent=${sourceAgentId} reason=${buildSteerReason(evaluation)} policy_action=steer`,
+            );
+            return {
+              block: true,
+              blockReason: USER_BLOCK_MESSAGE,
+            };
+          }
+
+          const description = buildApprovalDescription(event.toolName, evaluation);
+          if (event.toolName === EXEC_TOOL_NAME) {
+            logger.warn(
+              `agent-control: exec_native_approval_required tool=${event.toolName} agent=${sourceAgentId} reason=${description} ask=${EXEC_STEER_ASK_MODE} policy_action=steer`,
+            );
+            return {
+              params: buildNativeExecApprovalParams(),
+            };
+          }
+          logger.warn(
+            `agent-control: approval_required tool=${event.toolName} agent=${sourceAgentId} reason=${description}`,
+          );
+          return {
+            requireApproval: {
+              title: APPROVAL_TITLE,
+              description,
+              severity: "warning",
+              timeoutMs: APPROVAL_TIMEOUT_MS,
+              timeoutBehavior: "deny",
+              onResolution(resolution) {
+                logger.warn(
+                  `agent-control: approval_resolved tool=${event.toolName} agent=${sourceAgentId} decision=${resolution} policy_action=steer`,
+                );
+              },
+            },
+          };
         }
 
         logger.block(

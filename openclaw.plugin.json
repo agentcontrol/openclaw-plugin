@@ -1,7 +1,7 @@
 {
   "id": "agent-control-openclaw-plugin",
   "name": "Agent Control",
-  "description": "Registers OpenClaw tools with Agent Control and blocks unsafe tool invocations.",
+  "description": "Registers OpenClaw tools with Agent Control and blocks or escalates unsafe tool invocations.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -34,6 +34,10 @@
       "logLevel": {
         "type": "string",
         "enum": ["warn", "info", "debug"]
+      },
+      "steerBehavior": {
+        "type": "string",
+        "enum": ["requireApproval", "block"]
       }
     }
   },
@@ -57,6 +61,10 @@
     "logLevel": {
       "label": "Log Level",
       "help": "Controls plugin verbosity: warn logs only warnings, errors, and block events; info adds high-level lifecycle logs; debug adds verbose diagnostics."
+    },
+    "steerBehavior": {
+      "label": "Steer Behavior",
+      "help": "Controls how Agent Control steer decisions are handled for tool calls. requireApproval uses OpenClaw approvals, routing exec through native exec approval and other tools through plugin approvals; block rejects immediately."
     }
   }
 }
