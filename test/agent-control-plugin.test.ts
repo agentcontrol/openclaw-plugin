@@ -1,4 +1,5 @@
 import type {
+  OpenClawApprovalRequest,
   OpenClawBeforeToolCallContext,
   OpenClawBeforeToolCallEvent,
   OpenClawPluginApi,
@@ -203,17 +204,53 @@ describe("agent-control plugin logging and blocking", () => {
 
     // Then the tool call requires operator approval with the steering guidance
     expect(result).toEqual({
-      requireApproval: {
+      requireApproval: expect.objectContaining({
         title: "Agent Control approval required",
         description:
           'Tool call "shell" matched steering control(s): shell-review. Guidance: Review the command before running it.',
         severity: "warning",
         timeoutMs: 120_000,
         timeoutBehavior: "deny",
-      },
+        onResolution: expect.any(Function),
+      }),
     });
     expect(api.warn).toHaveBeenCalledWith(
       expect.stringContaining("approval_required tool=shell agent=default"),
+    );
+  });
+
+  it("logs the approval resolution when OpenClaw resolves a steer approval", async () => {
+    // Given a steer evaluation response that returns a plugin approval request
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: false,
+      matches: [
+        {
+          action: "steer",
+          controlName: "shell-review",
+          steeringContext: {
+            message: "Review the command before running it.",
+          },
+        },
+      ],
+      errors: null,
+    });
+
+    // When the plugin evaluates the tool call and OpenClaw reports an allow-once resolution
+    register(api.api);
+    const result = (await runBeforeToolCall(api)) as
+      | { requireApproval?: OpenClawApprovalRequest }
+      | undefined;
+    await result?.requireApproval?.onResolution?.("allow-once");
+
+    // Then the plugin logs the final approval resolution for the steered tool call
+    expect(api.warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "approval_resolved tool=shell agent=default decision=allow-once policy_action=steer",
+      ),
     );
   });
 

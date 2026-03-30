@@ -1,10 +1,20 @@
 declare module "openclaw/plugin-sdk/core" {
+  export type OpenClawApprovalResolution =
+    | "allow-once"
+    | "allow-always"
+    | "deny"
+    | "timeout"
+    | "cancelled";
+
   export type OpenClawApprovalRequest = {
     title: string;
     description: string;
     severity: "warning";
     timeoutMs: number;
     timeoutBehavior: "deny";
+    onResolution?: (
+      resolution: OpenClawApprovalResolution,
+    ) => void | Promise<void>;
   };
 
   export type OpenClawBeforeToolCallResult = {

@@ -408,6 +408,11 @@ export default function register(api: OpenClawPluginApi) {
               severity: "warning",
               timeoutMs: APPROVAL_TIMEOUT_MS,
               timeoutBehavior: "deny",
+              onResolution(resolution) {
+                logger.warn(
+                  `agent-control: approval_resolved tool=${event.toolName} agent=${sourceAgentId} decision=${resolution} policy_action=steer`,
+                );
+              },
             },
           };
         }
