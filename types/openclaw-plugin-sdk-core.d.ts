@@ -1,4 +1,28 @@
 declare module "openclaw/plugin-sdk/core" {
+  export type OpenClawApprovalResolution =
+    | "allow-once"
+    | "allow-always"
+    | "deny"
+    | "timeout"
+    | "cancelled";
+
+  export type OpenClawApprovalRequest = {
+    title: string;
+    description: string;
+    severity: "warning";
+    timeoutMs: number;
+    timeoutBehavior: "deny";
+    onResolution?: (
+      resolution: OpenClawApprovalResolution,
+    ) => void | Promise<void>;
+  };
+
+  export type OpenClawBeforeToolCallResult = {
+    block?: boolean;
+    blockReason?: string;
+    requireApproval?: OpenClawApprovalRequest;
+  };
+
   export type OpenClawBeforeToolCallEvent = {
     toolName: string;
     params?: unknown;
@@ -29,7 +53,7 @@ declare module "openclaw/plugin-sdk/core" {
       handler: (
         event: OpenClawBeforeToolCallEvent,
         ctx: OpenClawBeforeToolCallContext,
-      ) => unknown,
+      ) => OpenClawBeforeToolCallResult | void | Promise<OpenClawBeforeToolCallResult | void>,
     ): void;
     on(event: string, handler: (...args: any[]) => unknown): void;
   }
