@@ -56,6 +56,12 @@ For authenticated setups, also set:
 openclaw config set plugins.entries.agent-control-openclaw-plugin.config.apiKey "ac_your_api_key"
 ```
 
+### Example policy
+
+Here is an [example policy](https://gist.github.com/lan17/02a63572228a2bbda3dc658cf8323d20) which blocks all tools except read and memory for anyone who is not an admin.  For read you can specify approved files and folders.
+
+To use it, make sure your OpenClaw agent is already registered with Agent Control, then go to your agent in Agent Contorl UI, click "Add Control" -> "Create Contorl" -> "Write your own" and copy paste JSON.  
+
 ## Configuration
 
 | Setting | Type | Default | Description |
