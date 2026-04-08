@@ -1,6 +1,13 @@
 import { AgentControlClient } from "agent-control";
+import type { JsonValue } from "agent-control";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { createPluginLogger, resolveLogLevel } from "./logging.ts";
+import {
+  buildControlExecutionEvents,
+  buildControlObservabilityIndex,
+  emitControlExecutionEvents,
+  resolveTraceContext,
+} from "./observability.ts";
 import { resolveStepsForContext } from "./tool-catalog.ts";
 import { buildEvaluationContext } from "./session-context.ts";
 import {
@@ -74,6 +81,7 @@ export default function register(api: OpenClawPluginApi) {
   }
 
   const failClosed = cfg.failClosed === true;
+  const observabilityEnabled = cfg.observabilityEnabled !== false;
   const baseAgentName = asString(cfg.agentName) ?? "openclaw-agent";
   const configuredAgentVersion = asString(cfg.agentVersion);
   const pluginVersion = asString(api.version);
@@ -90,6 +98,9 @@ export default function register(api: OpenClawPluginApi) {
   });
   logger.info(
     `agent-control: client_init duration_sec=${secondsSince(clientInitStartedAt)} timeout_ms=${clientTimeoutMs ?? "default"} server_url=${serverUrl}`,
+  );
+  logger.info(
+    `agent-control: observability enabled=${observabilityEnabled}`,
   );
 
   const states = new Map<string, AgentState>();
@@ -110,6 +121,7 @@ export default function register(api: OpenClawPluginApi) {
       steps: [],
       stepsHash: hashSteps([]),
       lastSyncedStepsHash: null,
+      controlObservabilityById: new Map(),
       syncPromise: null,
     };
     states.set(sourceAgentId, created);
@@ -160,7 +172,7 @@ export default function register(api: OpenClawPluginApi) {
     const currentHash = state.stepsHash;
     const promise = (async () => {
       const syncStartedAt = process.hrtime.bigint();
-      await client.agents.init({
+      const syncResponse = await client.agents.init({
         agent: {
           agentName: state.agentName,
           agentVersion: configuredAgentVersion,
@@ -172,6 +184,9 @@ export default function register(api: OpenClawPluginApi) {
         },
         steps: state.steps,
       });
+      if (Array.isArray(syncResponse?.controls)) {
+        state.controlObservabilityById = buildControlObservabilityIndex(syncResponse.controls);
+      }
       logger.info(
         `agent-control: sync_agent duration_sec=${secondsSince(syncStartedAt)} agent=${state.sourceAgentId} step_count=${state.steps.length}`,
       );
@@ -283,21 +298,42 @@ export default function register(api: OpenClawPluginApi) {
         );
 
         const evaluateStartedAt = process.hrtime.bigint();
+        const traceContext = observabilityEnabled ? resolveTraceContext() : null;
         const evaluation = await client.evaluation.evaluate({
-          body: {
-            agentName: state.agentName,
-            stage: "pre",
-            step: {
-              type: "tool",
-              name: event.toolName,
-              input: event.params,
-              context,
-            },
+          agentName: state.agentName,
+          stage: "pre",
+          step: {
+            type: "tool",
+            name: event.toolName,
+            input: (event.params ?? null) as JsonValue,
+            context: context as Record<string, JsonValue | null>,
           },
         });
         logger.debug(
           `agent-control: before_tool_call phase=evaluate duration_sec=${secondsSince(evaluateStartedAt)} agent=${sourceAgentId} tool=${event.toolName} safe=${evaluation.isSafe}`,
         );
+
+        if (observabilityEnabled && traceContext) {
+          emitControlExecutionEvents({
+            client,
+            logger,
+            events: buildControlExecutionEvents({
+              evaluation,
+              agentName: state.agentName,
+              stepName: event.toolName,
+              stepType: "tool",
+              checkStage: "pre",
+              traceContext,
+              controlObservabilityById: state.controlObservabilityById,
+              sourceAgentId,
+              pluginId: api.id,
+              runId: event.runId ?? ctx.runId,
+              toolCallId: event.toolCallId ?? ctx.toolCallId,
+            }),
+            agentName: state.agentName,
+            stepName: event.toolName,
+          });
+        }
 
         if (evaluation.isSafe) {
           return;

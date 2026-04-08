@@ -2,6 +2,14 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 
 export type LogLevel = "warn" | "info" | "debug";
 
+export type ControlObservabilityIdentity = {
+  selectorPath: string | null;
+  evaluatorName: string | null;
+  leafCount: number;
+  allEvaluators: string[];
+  allSelectorPaths: string[];
+};
+
 export type AgentControlPluginConfig = {
   enabled?: boolean;
   serverUrl?: string;
@@ -11,6 +19,7 @@ export type AgentControlPluginConfig = {
   timeoutMs?: number;
   userAgent?: string;
   failClosed?: boolean;
+  observabilityEnabled?: boolean;
   logLevel?: LogLevel;
 };
 
@@ -28,6 +37,7 @@ export type AgentState = {
   steps: AgentControlStep[];
   stepsHash: string;
   lastSyncedStepsHash: string | null;
+  controlObservabilityById: Map<number, ControlObservabilityIdentity>;
   syncPromise: Promise<void> | null;
 };
 
