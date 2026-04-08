@@ -294,6 +294,61 @@ describe("agent-control plugin logging and blocking", () => {
     );
   });
 
+  it("warns when gateway warmup fails and still evaluates later tool calls", async () => {
+    // Given gateway warmup fails once before regular tool evaluation starts
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    resolveStepsForContextMock
+      .mockRejectedValueOnce(new Error("warmup exploded"))
+      .mockResolvedValue([{ type: "tool", name: "shell" }]);
+
+    // When gateway_start and a later tool evaluation are executed
+    register(api.api);
+    await runGatewayStart(api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the warmup failure is only warned and later tool calls still evaluate
+    expect(result).toBeUndefined();
+    expect(api.warn).toHaveBeenCalledWith(
+      expect.stringContaining("gateway_boot_warmup failed"),
+    );
+    expect(clientMocks.evaluationEvaluate).toHaveBeenCalledOnce();
+  });
+
+  it("waits for in-flight gateway warmup before evaluating a tool call", async () => {
+    // Given gateway warmup is still running when a tool call arrives
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+      logLevel: "debug",
+    });
+    const warmupDeferred = createDeferred<{ type: string; name: string }[]>();
+    resolveStepsForContextMock
+      .mockImplementationOnce(() => warmupDeferred.promise)
+      .mockResolvedValue([{ type: "tool", name: "shell" }]);
+
+    // When gateway_start begins warmup and before_tool_call fires before warmup completes
+    register(api.api);
+    const gatewayStartPromise = runGatewayStart(api);
+    await Promise.resolve();
+    const beforeToolCallPromise = runBeforeToolCall(api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Then evaluation does not begin until the warmup promise resolves
+    expect(clientMocks.evaluationEvaluate).not.toHaveBeenCalled();
+
+    warmupDeferred.resolve([{ type: "tool", name: "shell" }]);
+    await gatewayStartPromise;
+    await beforeToolCallPromise;
+
+    expect(clientMocks.evaluationEvaluate).toHaveBeenCalledOnce();
+    expect(api.info).toHaveBeenCalledWith(
+      expect.stringContaining("waiting_for_gateway_boot_warmup=true"),
+    );
+  });
+
   it("deduplicates concurrent syncs for the same source agent", async () => {
     // Given two concurrent tool calls sharing the same source agent and sync promise
     const api = createMockApi({
@@ -316,6 +371,47 @@ describe("agent-control plugin logging and blocking", () => {
     await Promise.all([first, second]);
 
     // Then only one sync starts and both tool calls eventually evaluate
+    expect(clientMocks.evaluationEvaluate).toHaveBeenCalledTimes(2);
+  });
+
+  it("resyncs immediately when steps change during an in-flight sync", async () => {
+    // Given one tool call changes the step catalog while another sync is still in flight
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+    const syncDeferred = createDeferred<void>();
+    clientMocks.agentsInit
+      .mockImplementationOnce(() => syncDeferred.promise)
+      .mockResolvedValueOnce(undefined);
+    resolveStepsForContextMock
+      .mockResolvedValueOnce([{ type: "tool", name: "shell" }])
+      .mockResolvedValueOnce([
+        { type: "tool", name: "shell" },
+        { type: "tool", name: "grep" },
+      ]);
+
+    // When a second tool call updates the steps before the first sync completes
+    register(api.api);
+    const first = runBeforeToolCall(api);
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = runBeforeToolCall(api, { toolName: "grep" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(clientMocks.agentsInit).toHaveBeenCalledTimes(1);
+
+    syncDeferred.resolve(undefined);
+    await Promise.all([first, second]);
+
+    // Then the plugin immediately performs a second sync using the newer step catalog
+    expect(clientMocks.agentsInit).toHaveBeenCalledTimes(2);
+    expect(clientMocks.agentsInit.mock.calls[1]?.[0]).toMatchObject({
+      steps: [
+        { type: "tool", name: "shell" },
+        { type: "tool", name: "grep" },
+      ],
+    });
     expect(clientMocks.evaluationEvaluate).toHaveBeenCalledTimes(2);
   });
 
@@ -559,6 +655,73 @@ describe("agent-control plugin logging and blocking", () => {
     expect(result).toBeUndefined();
     expect(api.warn).toHaveBeenCalledWith(
       expect.stringContaining("observability_ingest failed"),
+    );
+  });
+
+  it("allows the tool call when fail-open sync fails", async () => {
+    // Given fail-open mode and a step-resolution failure before evaluation
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    resolveStepsForContextMock.mockRejectedValueOnce(new Error("resolver exploded"));
+
+    // When the plugin attempts to evaluate a tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the tool call is allowed to continue without evaluation
+    expect(result).toBeUndefined();
+    expect(clientMocks.evaluationEvaluate).not.toHaveBeenCalled();
+    expect(api.warn).toHaveBeenCalledWith(expect.stringContaining("unable to sync"));
+    expect(api.warn).not.toHaveBeenCalledWith(expect.stringContaining("blocked tool=shell"));
+  });
+
+  it("blocks the tool call when fail-closed evaluation throws", async () => {
+    // Given fail-closed mode and an evaluation request that throws
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+      failClosed: true,
+    });
+
+    clientMocks.evaluationEvaluate.mockRejectedValueOnce(new Error("eval exploded"));
+
+    // When the plugin evaluates a tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the tool call is blocked by the evaluation failure fallback
+    expect(result).toEqual({
+      block: true,
+      blockReason: USER_BLOCK_MESSAGE,
+    });
+    expect(api.warn.mock.calls.map(([message]) => String(message))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("evaluation failed"),
+        expect.stringContaining("reason=evaluation_failed fail_closed=true"),
+      ]),
+    );
+  });
+
+  it("allows the tool call when fail-open evaluation throws", async () => {
+    // Given fail-open mode and an evaluation request that throws
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.evaluationEvaluate.mockRejectedValueOnce(new Error("eval exploded"));
+
+    // When the plugin evaluates a tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the tool call is allowed and only the failure warning is emitted
+    expect(result).toBeUndefined();
+    expect(api.warn).toHaveBeenCalledWith(
+      expect.stringContaining("evaluation failed for agent=default tool=shell"),
+    );
+    expect(api.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("reason=evaluation_failed fail_closed=true"),
     );
   });
 });
