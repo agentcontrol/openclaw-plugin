@@ -32,7 +32,8 @@
         "type": "boolean"
       },
       "observabilityEnabled": {
-        "type": "boolean"
+        "type": "boolean",
+        "default": true
       },
       "logLevel": {
         "type": "string",
@@ -59,7 +60,7 @@
     },
     "observabilityEnabled": {
       "label": "Enable Observability",
-      "help": "If true, emit best-effort pre-tool control execution events to Agent Control observability."
+      "help": "Defaults to true. Set false to disable best-effort pre-tool control execution events to Agent Control observability."
     },
     "logLevel": {
       "label": "Log Level",

@@ -81,7 +81,7 @@ export default function register(api: OpenClawPluginApi) {
   }
 
   const failClosed = cfg.failClosed === true;
-  const observabilityEnabled = cfg.observabilityEnabled === true;
+  const observabilityEnabled = cfg.observabilityEnabled !== false;
   const baseAgentName = asString(cfg.agentName) ?? "openclaw-agent";
   const configuredAgentVersion = asString(cfg.agentVersion);
   const pluginVersion = asString(api.version);

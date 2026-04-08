@@ -440,9 +440,36 @@ describe("agent-control plugin logging and blocking", () => {
     clientMocks.evaluationEvaluate.mockResolvedValueOnce({
       isSafe: false,
       matches: [
-        { action: "deny", controlName: "alpha" },
-        { action: "deny", controlName: "alpha" },
-        { action: "deny", controlName: "beta" },
+        {
+          action: "deny",
+          controlExecutionId: "exec-alpha-1",
+          controlId: 1,
+          controlName: "alpha",
+          result: {
+            matched: true,
+            confidence: 0.9,
+          },
+        },
+        {
+          action: "deny",
+          controlExecutionId: "exec-alpha-2",
+          controlId: 2,
+          controlName: "alpha",
+          result: {
+            matched: true,
+            confidence: 0.8,
+          },
+        },
+        {
+          action: "deny",
+          controlExecutionId: "exec-beta-1",
+          controlId: 3,
+          controlName: "beta",
+          result: {
+            matched: true,
+            confidence: 0.7,
+          },
+        },
       ],
       errors: null,
     });
@@ -480,11 +507,10 @@ describe("agent-control plugin logging and blocking", () => {
     );
   });
 
-  it("emits control execution events when observability is enabled", async () => {
-    // Given observability is enabled and the synced agent returns one rendered control
+  it("emits control execution events by default when observability is not configured", async () => {
+    // Given observability is left unset and the synced agent returns one rendered control
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
-      observabilityEnabled: true,
     });
 
     clientMocks.agentsInit.mockResolvedValueOnce({
@@ -620,11 +646,10 @@ describe("agent-control plugin logging and blocking", () => {
     expect(nonMatchEvent.spanId).toBe(matchedEvent.spanId);
   });
 
-  it("does not fail the tool call when observability ingestion fails", async () => {
-    // Given observability is enabled but the ingest request fails
+  it("does not fail the tool call when default observability ingestion fails", async () => {
+    // Given observability is left unset but the ingest request fails
     const api = createMockApi({
       serverUrl: "http://localhost:8000",
-      observabilityEnabled: true,
     });
 
     clientMocks.evaluationEvaluate.mockResolvedValueOnce({
@@ -656,6 +681,41 @@ describe("agent-control plugin logging and blocking", () => {
     expect(api.warn).toHaveBeenCalledWith(
       expect.stringContaining("observability_ingest failed"),
     );
+  });
+
+  it("does not emit control execution events when observability is explicitly disabled", async () => {
+    // Given observability is explicitly disabled in plugin configuration
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+      observabilityEnabled: false,
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: true,
+      confidence: 1,
+      nonMatches: [
+        {
+          action: "observe",
+          controlExecutionId: "exec-non-match",
+          controlId: 9,
+          controlName: "allow-shell",
+          result: {
+            matched: false,
+            confidence: 0.2,
+          },
+        },
+      ],
+    });
+
+    // When the plugin evaluates a tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Then the tool call still proceeds and no observability batch is sent
+    expect(result).toBeUndefined();
+    expect(clientMocks.ingestEvents).not.toHaveBeenCalled();
   });
 
   it("allows the tool call when fail-open sync fails", async () => {

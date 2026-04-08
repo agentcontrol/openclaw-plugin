@@ -66,7 +66,7 @@ openclaw config set plugins.entries.agent-control-openclaw-plugin.config.apiKey 
 | `agentVersion` | string | — | Version string sent to Agent Control during agent sync. |
 | `timeoutMs` | integer | SDK default | Client timeout in milliseconds. |
 | `failClosed` | boolean | `false` | Block tool calls when Agent Control is unreachable. See [Fail-open vs fail-closed](#fail-open-vs-fail-closed). |
-| `observabilityEnabled` | boolean | `false` | Emit pre-tool control execution events to Agent Control observability. Disabled by default. |
+| `observabilityEnabled` | boolean | `true` | Emit pre-tool control execution events to Agent Control observability. Enabled by default unless explicitly set to `false`. |
 | `logLevel` | string | `warn` | Logging verbosity. See [Logging](#logging). |
 | `userAgent` | string | `openclaw-agent-control-plugin/0.1` | Custom User-Agent header for requests to Agent Control. |
 
@@ -99,16 +99,16 @@ openclaw config set plugins.entries.agent-control-openclaw-plugin.config.failClo
 
 ## Observability
 
-Observability is opt-in. When `observabilityEnabled` is `true`, the plugin sends control execution events to Agent Control's observability API after each `before_tool_call` evaluation.
+Observability is enabled by default. Unless `observabilityEnabled` is explicitly set to `false`, the plugin sends control execution events to Agent Control's observability API after each `before_tool_call` evaluation.
 
 - Events are emitted only for the `pre` stage because the current OpenClaw plugin SDK typings expose a pre-tool hook but no post-tool hook.
 - Emission is best-effort and non-blocking. Ingest failures are logged at `warn` and do not change allow/block behavior.
 - The plugin stamps OpenTelemetry trace and span IDs when an active span exists, otherwise it generates OTEL-compatible IDs locally.
 
-Enable it with:
+Disable it with:
 
 ```bash
-openclaw config set plugins.entries.agent-control-openclaw-plugin.config.observabilityEnabled true
+openclaw config set plugins.entries.agent-control-openclaw-plugin.config.observabilityEnabled false
 ```
 
 ## Logging
