@@ -31,6 +31,9 @@
       "failClosed": {
         "type": "boolean"
       },
+      "observabilityEnabled": {
+        "type": "boolean"
+      },
       "logLevel": {
         "type": "string",
         "enum": ["warn", "info", "debug"]
@@ -53,6 +56,10 @@
     "failClosed": {
       "label": "Fail Closed",
       "help": "If true, block tool invocations when Agent Control is unavailable."
+    },
+    "observabilityEnabled": {
+      "label": "Enable Observability",
+      "help": "If true, emit best-effort pre-tool control execution events to Agent Control observability."
     },
     "logLevel": {
       "label": "Log Level",

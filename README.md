@@ -66,6 +66,7 @@ openclaw config set plugins.entries.agent-control-openclaw-plugin.config.apiKey 
 | `agentVersion` | string | — | Version string sent to Agent Control during agent sync. |
 | `timeoutMs` | integer | SDK default | Client timeout in milliseconds. |
 | `failClosed` | boolean | `false` | Block tool calls when Agent Control is unreachable. See [Fail-open vs fail-closed](#fail-open-vs-fail-closed). |
+| `observabilityEnabled` | boolean | `false` | Emit pre-tool control execution events to Agent Control observability. Disabled by default. |
 | `logLevel` | string | `warn` | Logging verbosity. See [Logging](#logging). |
 | `userAgent` | string | `openclaw-agent-control-plugin/0.1` | Custom User-Agent header for requests to Agent Control. |
 
@@ -94,6 +95,20 @@ Set `failClosed` to `true` if you need the guarantee that no tool call executes 
 
 ```bash
 openclaw config set plugins.entries.agent-control-openclaw-plugin.config.failClosed true
+```
+
+## Observability
+
+Observability is opt-in. When `observabilityEnabled` is `true`, the plugin sends control execution events to Agent Control's observability API after each `before_tool_call` evaluation.
+
+- Events are emitted only for the `pre` stage because the current OpenClaw plugin SDK typings expose a pre-tool hook but no post-tool hook.
+- Emission is best-effort and non-blocking. Ingest failures are logged at `warn` and do not change allow/block behavior.
+- The plugin stamps OpenTelemetry trace and span IDs when an active span exists, otherwise it generates OTEL-compatible IDs locally.
+
+Enable it with:
+
+```bash
+openclaw config set plugins.entries.agent-control-openclaw-plugin.config.observabilityEnabled true
 ```
 
 ## Logging
@@ -133,6 +148,7 @@ openclaw plugins disable agent-control-openclaw-plugin
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.apiKey
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.logLevel
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.agentVersion
+openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.observabilityEnabled
 openclaw config unset plugins.entries.agent-control-openclaw-plugin.config.userAgent
 ```
 

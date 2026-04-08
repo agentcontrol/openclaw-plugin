@@ -50,6 +50,7 @@ describe("buildEvaluationContext", () => {
         steps: [],
         stepsHash: "hash-1",
         lastSyncedStepsHash: null,
+        controlObservabilityById: new Map(),
         syncPromise: null,
       },
       event: {
@@ -103,6 +104,7 @@ describe("buildEvaluationContext", () => {
         steps: [{ type: "tool" as const, name: "shell" }],
         stepsHash: "hash-1",
         lastSyncedStepsHash: "hash-0",
+        controlObservabilityById: new Map(),
         syncPromise: null,
       },
       event: {},
@@ -158,6 +160,7 @@ describe("buildEvaluationContext", () => {
         steps: [],
         stepsHash: "hash-1",
         lastSyncedStepsHash: null,
+        controlObservabilityById: new Map(),
         syncPromise: null,
       },
       event: {},

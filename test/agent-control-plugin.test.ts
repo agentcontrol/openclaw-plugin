@@ -15,6 +15,7 @@ const {
     init: vi.fn(),
     agentsInit: vi.fn(),
     evaluationEvaluate: vi.fn(),
+    ingestEvents: vi.fn(),
   },
   resolveStepsForContextMock: vi.fn(),
   buildEvaluationContextMock: vi.fn(),
@@ -28,6 +29,9 @@ vi.mock("agent-control", () => ({
     };
     evaluation = {
       evaluate: clientMocks.evaluationEvaluate,
+    };
+    observability = {
+      ingestEvents: clientMocks.ingestEvents,
     };
   },
 }));
@@ -114,6 +118,12 @@ beforeEach(() => {
   clientMocks.init.mockReset();
   clientMocks.agentsInit.mockReset().mockResolvedValue(undefined);
   clientMocks.evaluationEvaluate.mockReset().mockResolvedValue({ isSafe: true });
+  clientMocks.ingestEvents.mockReset().mockResolvedValue({
+    received: 0,
+    enqueued: 0,
+    dropped: 0,
+    status: "queued",
+  });
   resolveStepsForContextMock.mockReset().mockResolvedValue([{ type: "tool", name: "shell" }]);
   buildEvaluationContextMock.mockReset().mockResolvedValue({ channelType: "unknown" });
 });
@@ -371,6 +381,184 @@ describe("agent-control plugin logging and blocking", () => {
     // Then the generic policy block reason is logged
     expect(api.warn).toHaveBeenCalledWith(
       expect.stringContaining("reason=[agent-control] blocked by policy evaluation"),
+    );
+  });
+
+  it("emits control execution events when observability is enabled", async () => {
+    // Given observability is enabled and the synced agent returns one rendered control
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+      observabilityEnabled: true,
+    });
+
+    clientMocks.agentsInit.mockResolvedValueOnce({
+      controls: [
+        {
+          id: 7,
+          name: "deny-shell",
+          control: {
+            action: {
+              decision: "deny",
+            },
+            condition: {
+              selector: {
+                path: "input.command",
+              },
+              evaluator: {
+                name: "regex",
+                config: {
+                  pattern: "rm -rf",
+                },
+              },
+            },
+            enabled: true,
+            execution: "server",
+          },
+        },
+      ],
+    });
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: false,
+      confidence: 0.5,
+      matches: [
+        {
+          action: "deny",
+          controlExecutionId: "exec-match",
+          controlId: 7,
+          controlName: "deny-shell",
+          result: {
+            matched: true,
+            confidence: 0.99,
+            metadata: {
+              policy_source: "server",
+            },
+          },
+        },
+      ],
+      errors: [
+        {
+          action: "observe",
+          controlExecutionId: "exec-error",
+          controlId: 8,
+          controlName: "audit-shell",
+          result: {
+            matched: false,
+            confidence: 0.1,
+            error: "timeout",
+          },
+        },
+      ],
+      nonMatches: [
+        {
+          action: "observe",
+          controlExecutionId: "exec-non-match",
+          controlId: 9,
+          controlName: "allow-shell",
+          result: {
+            matched: false,
+            confidence: 0.2,
+          },
+        },
+      ],
+    });
+
+    // When the tool call is evaluated for a named source agent
+    register(api.api);
+    await runBeforeToolCall(api, {}, { agentId: "worker-1" });
+
+    // Then the plugin sends one observability batch with per-control events
+    expect(clientMocks.ingestEvents).toHaveBeenCalledTimes(1);
+    const request = clientMocks.ingestEvents.mock.calls[0]?.[0];
+    expect(request.events).toHaveLength(3);
+
+    const [matchedEvent, errorEvent, nonMatchEvent] = request.events;
+    expect(matchedEvent).toMatchObject({
+      action: "deny",
+      agentName: "openclaw-agent:worker-1",
+      appliesTo: "tool_call",
+      checkStage: "pre",
+      controlExecutionId: "exec-match",
+      controlId: 7,
+      controlName: "deny-shell",
+      evaluatorName: "regex",
+      matched: true,
+      selectorPath: "input.command",
+    });
+    expect(matchedEvent.metadata).toMatchObject({
+      policy_source: "server",
+      primary_evaluator: "regex",
+      primary_selector_path: "input.command",
+      leaf_count: 1,
+      all_evaluators: ["regex"],
+      all_selector_paths: ["input.command"],
+      openclaw_step_name: "shell",
+      openclaw_step_type: "tool",
+      openclaw_source_agent_id: "worker-1",
+      openclaw_plugin_id: "agent-control-openclaw-plugin",
+      openclaw_run_id: "run-1",
+      openclaw_tool_call_id: "call-1",
+    });
+    expect(matchedEvent.traceId).toMatch(/^[a-f0-9]{32}$/);
+    expect(matchedEvent.spanId).toMatch(/^[a-f0-9]{16}$/);
+
+    expect(errorEvent).toMatchObject({
+      action: "observe",
+      controlExecutionId: "exec-error",
+      controlId: 8,
+      controlName: "audit-shell",
+      errorMessage: "timeout",
+      matched: false,
+    });
+    expect(errorEvent.traceId).toBe(matchedEvent.traceId);
+    expect(errorEvent.spanId).toBe(matchedEvent.spanId);
+
+    expect(nonMatchEvent).toMatchObject({
+      action: "observe",
+      controlExecutionId: "exec-non-match",
+      controlId: 9,
+      controlName: "allow-shell",
+      errorMessage: null,
+      matched: false,
+    });
+    expect(nonMatchEvent.traceId).toBe(matchedEvent.traceId);
+    expect(nonMatchEvent.spanId).toBe(matchedEvent.spanId);
+  });
+
+  it("does not fail the tool call when observability ingestion fails", async () => {
+    // Given observability is enabled but the ingest request fails
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+      observabilityEnabled: true,
+    });
+
+    clientMocks.evaluationEvaluate.mockResolvedValueOnce({
+      isSafe: true,
+      confidence: 1,
+      nonMatches: [
+        {
+          action: "observe",
+          controlExecutionId: "exec-non-match",
+          controlId: 9,
+          controlName: "allow-shell",
+          result: {
+            matched: false,
+            confidence: 0.2,
+          },
+        },
+      ],
+    });
+    clientMocks.ingestEvents.mockRejectedValueOnce(new Error("observability offline"));
+
+    // When the plugin evaluates the tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Then the tool call is still allowed and the ingest failure is only logged
+    expect(result).toBeUndefined();
+    expect(api.warn).toHaveBeenCalledWith(
+      expect.stringContaining("observability_ingest failed"),
     );
   });
 });
