@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
-    "agent-control": "^2.2.0",
+    "agent-control": "^2.3.0",
     "esbuild": "^0.27.3",
     "jiti": "^2.6.1"
   },
