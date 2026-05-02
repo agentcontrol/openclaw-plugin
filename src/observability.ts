@@ -7,6 +7,7 @@ import type {
   ControlExecutionEvent,
   EvaluationResponse,
 } from "agent-control";
+import { formatAgentControlError } from "./logging.ts";
 import { isRecord } from "./shared.ts";
 import type { ControlObservabilityIdentity, PluginLogger } from "./types.ts";
 
@@ -242,7 +243,7 @@ export function emitControlExecutionEvents(params: EmitControlExecutionEventsPar
     })
     .catch((error) => {
       params.logger.warn(
-        `agent-control: observability_ingest failed agent=${params.agentName} step=${params.stepName} error=${String(error)}`,
+        `agent-control: observability_ingest failed agent=${params.agentName} step=${params.stepName} error=${formatAgentControlError(error)}`,
       );
     });
 }

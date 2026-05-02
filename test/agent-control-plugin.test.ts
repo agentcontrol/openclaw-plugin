@@ -63,6 +63,24 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
+function createAgentControlServerError(
+  status: number,
+  payload: Record<string, unknown>,
+  statusText = "Server Error",
+) {
+  const body = JSON.stringify(payload);
+  return {
+    name: "AgentControlSDKDefaultError",
+    message: "API error occurred",
+    response$: new Response(body, {
+      status,
+      statusText,
+      headers: { "content-type": "application/json" },
+    }),
+    body$: body,
+  };
+}
+
 function createMockApi(pluginConfig: Record<string, unknown>): MockApi {
   const handlers = new Map<string, (...args: any[]) => unknown>();
   const info = vi.fn();
@@ -668,7 +686,9 @@ describe("agent-control plugin logging and blocking", () => {
         },
       ],
     });
-    clientMocks.ingestEvents.mockRejectedValueOnce(new Error("observability offline"));
+    clientMocks.ingestEvents.mockRejectedValueOnce(
+      createAgentControlServerError(503, { error: "observability offline" }, "Service Unavailable"),
+    );
 
     // When the plugin evaluates the tool call
     register(api.api);
@@ -678,9 +698,11 @@ describe("agent-control plugin logging and blocking", () => {
 
     // Then the tool call is still allowed and the ingest failure is only logged
     expect(result).toBeUndefined();
-    expect(api.warn).toHaveBeenCalledWith(
-      expect.stringContaining("observability_ingest failed"),
-    );
+    const warning = api.warn.mock.calls
+      .map(([message]) => String(message))
+      .find((message) => message.includes("observability_ingest failed"));
+    expect(warning).toContain("status=503");
+    expect(warning).toContain('response_body={"error":"observability offline"}');
   });
 
   it("does not emit control execution events when observability is explicitly disabled", async () => {
@@ -718,6 +740,31 @@ describe("agent-control plugin logging and blocking", () => {
     expect(clientMocks.ingestEvents).not.toHaveBeenCalled();
   });
 
+
+  it("logs Agent Control response details when agent sync fails", async () => {
+    // Given the Agent Control server rejects agent sync with an HTTP payload
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.agentsInit.mockRejectedValueOnce(
+      createAgentControlServerError(409, { detail: "agent registration conflict" }, "Conflict"),
+    );
+
+    // When the plugin attempts to sync before evaluating a tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the failure warning includes the HTTP status and response payload
+    expect(result).toBeUndefined();
+    const warning = api.warn.mock.calls
+      .map(([message]) => String(message))
+      .find((message) => message.includes("unable to sync"));
+    expect(warning).toContain("status=409");
+    expect(warning).toContain('response_body={"detail":"agent registration conflict"}');
+    expect(clientMocks.evaluationEvaluate).not.toHaveBeenCalled();
+  });
+
   it("allows the tool call when fail-open sync fails", async () => {
     // Given fail-open mode and a step-resolution failure before evaluation
     const api = createMockApi({
@@ -735,6 +782,30 @@ describe("agent-control plugin logging and blocking", () => {
     expect(clientMocks.evaluationEvaluate).not.toHaveBeenCalled();
     expect(api.warn).toHaveBeenCalledWith(expect.stringContaining("unable to sync"));
     expect(api.warn).not.toHaveBeenCalledWith(expect.stringContaining("blocked tool=shell"));
+  });
+
+
+  it("logs Agent Control response details when evaluation fails", async () => {
+    // Given the Agent Control server rejects policy evaluation with an HTTP payload
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    clientMocks.evaluationEvaluate.mockRejectedValueOnce(
+      createAgentControlServerError(500, { error: "policy engine unavailable" }, "Internal Server Error"),
+    );
+
+    // When the plugin attempts to evaluate a tool call
+    register(api.api);
+    const result = await runBeforeToolCall(api);
+
+    // Then the failure warning includes the HTTP status and response payload
+    expect(result).toBeUndefined();
+    const warning = api.warn.mock.calls
+      .map(([message]) => String(message))
+      .find((message) => message.includes("evaluation failed for agent=default tool=shell"));
+    expect(warning).toContain("status=500");
+    expect(warning).toContain('response_body={"error":"policy engine unavailable"}');
   });
 
   it("blocks the tool call when fail-closed evaluation throws", async () => {
