@@ -1,4 +1,4 @@
-name: PR Title
+name: Semantic PR Title
 
 on:
   pull_request:
@@ -13,36 +13,49 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: pr-title-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: semantic-pr-title-${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  conventional-pr-title:
+  semantic-pr-title:
     runs-on: ubuntu-latest
     steps:
-      - name: Validate PR title
+      - name: Check out PR head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Validate semantic PR title and head commit subject
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           python3 - <<'PY'
           import os
           import re
+          import subprocess
           import sys
 
-          title = os.environ["PR_TITLE"]
           pattern = re.compile(
               r"^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]+\))?(!)?: .+"
           )
+          allowed = "build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test"
 
-          if pattern.match(title):
-              print("PR title is a valid conventional commit title.")
-              raise SystemExit(0)
+          def validate(label: str, value: str) -> None:
+              if pattern.match(value):
+                  print(f"{label} is a valid conventional commit title: {value}")
+                  return
 
-          print(f"Invalid PR title: {title}", file=sys.stderr)
-          print("Expected format: type(scope): description", file=sys.stderr)
-          print(
-              "Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test",
-              file=sys.stderr,
-          )
-          raise SystemExit(1)
+              print(f"Invalid {label}: {value}", file=sys.stderr)
+              print("Expected format: type(scope): description", file=sys.stderr)
+              print(f"Allowed types: {allowed}", file=sys.stderr)
+              raise SystemExit(1)
+
+          validate("PR title", os.environ["PR_TITLE"])
+
+          head_subject = subprocess.check_output(
+              ["git", "log", "-1", "--pretty=%s"],
+              text=True,
+          ).strip()
+          validate("head commit subject", head_subject)
           PY
