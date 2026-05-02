@@ -1,7 +1,7 @@
 import { AgentControlClient } from "agent-control";
 import type { JsonValue } from "agent-control";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
-import { createPluginLogger, resolveLogLevel } from "./logging.ts";
+import { createPluginLogger, formatAgentControlError, resolveLogLevel } from "./logging.ts";
 import {
   buildControlExecutionEvents,
   buildControlObservabilityIndex,
@@ -153,7 +153,7 @@ export default function register(api: OpenClawPluginApi) {
       .catch((err) => {
         gatewayWarmupStatus = "failed";
         logger.warn(
-          `agent-control: gateway_boot_warmup failed duration_sec=${secondsSince(warmupStartedAt)} agent=${BOOT_WARMUP_AGENT_ID} error=${String(err)}`,
+          `agent-control: gateway_boot_warmup failed duration_sec=${secondsSince(warmupStartedAt)} agent=${BOOT_WARMUP_AGENT_ID} error=${formatAgentControlError(err)}`,
         );
       });
 
@@ -255,7 +255,7 @@ export default function register(api: OpenClawPluginApi) {
         );
       } catch (err) {
         logger.warn(
-          `agent-control: unable to sync agent=${sourceAgentId} before tool evaluation: ${String(err)}`,
+          `agent-control: unable to sync agent=${sourceAgentId} before tool evaluation: ${formatAgentControlError(err)}`,
         );
         if (failClosed) {
           logger.block(
@@ -348,7 +348,7 @@ export default function register(api: OpenClawPluginApi) {
         };
       } catch (err) {
         logger.warn(
-          `agent-control: evaluation failed for agent=${sourceAgentId} tool=${event.toolName}: ${String(err)}`,
+          `agent-control: evaluation failed for agent=${sourceAgentId} tool=${event.toolName}: ${formatAgentControlError(err)}`,
         );
         if (failClosed) {
           logger.block(
