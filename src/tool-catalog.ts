@@ -312,6 +312,8 @@ function resolveStepsCacheKey(params: ResolveStepsForContextParams, config: Reco
   return JSON.stringify({
     sourceAgentId: params.sourceAgentId,
     sessionKey: params.sessionKey ?? null,
+    sessionId: params.sessionId ?? null,
+    runId: params.runId ?? null,
     configHash: hashJsonRecord(config),
   });
 }

@@ -199,7 +199,7 @@ describe("resolveSessionIdentity", () => {
   });
 
   it("refreshes the identity after the TTL expires", async () => {
-    // Given cached session-store metadata and a store update after the known-metadata TTL window
+    // Given cached session-store metadata and a store update after the TTL window
     vi.useFakeTimers();
     const { resolveSessionIdentity, mocks } = await loadSessionStoreModule({
       initialStore: {
@@ -227,13 +227,76 @@ describe("resolveSessionIdentity", () => {
         },
       },
     });
-    vi.advanceTimersByTime(60_001);
+    vi.advanceTimersByTime(2_001);
 
     // Then the refreshed identity is returned and the store is reloaded
     await expect(resolveSessionIdentity("agent:worker-1:slack:direct:alice")).resolves.toMatchObject({
       label: "Bob",
     });
     expect(mocks.loadSessionStore).toHaveBeenCalledTimes(2);
+  });
+
+  it("keys cached identity by resolved store path", async () => {
+    // Given two source agents can resolve the same legacy key in separate stores
+    const { resolveSessionIdentity, mocks } = await loadSessionStoreModule({
+      throws: true,
+    });
+    const loadConfig = vi.fn(() => ({
+      session: {
+        store: "/tmp/{agentId}/sessions.json",
+      },
+    }));
+    const resolveStorePath = vi.fn(
+      (storePath?: string, opts?: { agentId?: string }) =>
+        (storePath ?? "").replace("{agentId}", opts?.agentId ?? "main"),
+    );
+    const loadSessionStore = vi.fn((storePath: string) => ({
+      "/tmp/worker-1/sessions.json": {
+        "legacy-session": {
+          origin: {
+            provider: "slack",
+            chatType: "direct",
+            label: "Alice",
+          },
+        },
+      },
+      "/tmp/worker-2/sessions.json": {
+        "legacy-session": {
+          origin: {
+            provider: "discord",
+            chatType: "channel",
+            label: "House Buying",
+          },
+        },
+      },
+    })[storePath] ?? {});
+    const api = createApi({ loadConfig, resolveStorePath, loadSessionStore });
+
+    // When the same session key is resolved for two different source agents
+    const first = await resolveSessionIdentity({
+      api,
+      sourceAgentId: "worker-1",
+      sessionKey: "legacy-session",
+    });
+    const second = await resolveSessionIdentity({
+      api,
+      sourceAgentId: "worker-2",
+      sessionKey: "legacy-session",
+    });
+
+    // Then each lookup returns metadata from its own resolved store
+    expect(first).toMatchObject({
+      provider: "slack",
+      label: "Alice",
+      type: "direct",
+    });
+    expect(second).toMatchObject({
+      provider: "discord",
+      label: "House Buying",
+      type: "channel",
+    });
+    expect(loadSessionStore).toHaveBeenCalledTimes(2);
+    expect(mocks.importOpenClawInternalModule).not.toHaveBeenCalled();
   });
 
   it("uses injected runtime helpers before falling back to internal imports", async () => {

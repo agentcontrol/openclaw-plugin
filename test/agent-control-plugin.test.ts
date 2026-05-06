@@ -10,6 +10,7 @@ const {
   clientMocks,
   resolveStepsForContextMock,
   buildEvaluationContextMock,
+  warmSessionIdentityResolverMock,
 } = vi.hoisted(() => ({
   clientMocks: {
     init: vi.fn(),
@@ -19,6 +20,7 @@ const {
   },
   resolveStepsForContextMock: vi.fn(),
   buildEvaluationContextMock: vi.fn(),
+  warmSessionIdentityResolverMock: vi.fn(),
 }));
 
 vi.mock("agent-control", () => ({
@@ -42,6 +44,10 @@ vi.mock("../src/tool-catalog.ts", () => ({
 
 vi.mock("../src/session-context.ts", () => ({
   buildEvaluationContext: buildEvaluationContextMock,
+}));
+
+vi.mock("../src/session-store.ts", () => ({
+  warmSessionIdentityResolver: warmSessionIdentityResolverMock,
 }));
 
 import register from "../src/agent-control-plugin.ts";
@@ -144,6 +150,7 @@ beforeEach(() => {
   });
   resolveStepsForContextMock.mockReset().mockResolvedValue([{ type: "tool", name: "shell" }]);
   buildEvaluationContextMock.mockReset().mockResolvedValue({ channelType: "unknown" });
+  warmSessionIdentityResolverMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe("agent-control plugin logging and blocking", () => {
@@ -305,6 +312,48 @@ describe("agent-control plugin logging and blocking", () => {
 
     // Then warmup work is reused and step resolution only runs once
     expect(resolveStepsForContextMock).toHaveBeenCalledTimes(1);
+    expect(resolveStepsForContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceAgentId: "main",
+      }),
+    );
+  });
+
+  it("warms session identity resolution once across repeated gateway_start events", async () => {
+    // Given a plugin instance that can warm session metadata on gateway startup
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+
+    // When gateway_start is fired twice
+    register(api.api);
+    await runGatewayStart(api);
+    await runGatewayStart(api);
+
+    // Then session identity warmup is started once for the default source agent
+    expect(warmSessionIdentityResolverMock).toHaveBeenCalledTimes(1);
+    expect(warmSessionIdentityResolverMock).toHaveBeenCalledWith({
+      api: api.api,
+      sourceAgentId: "main",
+    });
+  });
+
+  it("does not fail gateway_start when session identity warmup fails", async () => {
+    // Given debug logging and a session identity warmup failure
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+      logLevel: "debug",
+    });
+    warmSessionIdentityResolverMock.mockRejectedValueOnce(new Error("session warmup exploded"));
+
+    // When gateway_start runs
+    register(api.api);
+    await expect(runGatewayStart(api)).resolves.toBeUndefined();
+    await Promise.resolve();
+
+    // Then the failure is logged as debug and gateway tool warmup still completes
+    const messages = api.info.mock.calls.map(([message]) => String(message));
+    expect(messages.some((message) => message.includes("session_identity_warmup failed"))).toBe(true);
     expect(resolveStepsForContextMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceAgentId: "main",
