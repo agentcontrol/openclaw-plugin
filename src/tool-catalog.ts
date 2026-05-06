@@ -23,8 +23,19 @@ import {
 const TOOL_CATALOG_BUNDLE_DIRNAME = path.join("dist", "agent-control-generated", "tool-catalog");
 const TOOL_CATALOG_BUNDLE_FILE = "index.mjs";
 const TOOL_CATALOG_WRAPPER_FILE = "entry.ts";
+const TOOL_CATALOG_STEPS_CACHE_TTL_MS = 30_000;
+const TOOL_CATALOG_STEPS_CACHE_MAX = 128;
 
 let toolCatalogInternalsPromise: Promise<ToolCatalogInternals> | null = null;
+
+type ToolCatalogStepsCacheEntry = {
+  at: number;
+  expiresAt?: number;
+  promise?: Promise<AgentControlStep[]>;
+  steps?: AgentControlStep[];
+};
+
+const toolCatalogStepsCache = new Map<string, ToolCatalogStepsCacheEntry>();
 
 function resolveToolCatalogBundleBuildInfo(openClawRoot: string): ToolCatalogBundleBuildInfo {
   const piToolsSource = path.join(openClawRoot, "src/agents/pi-tools.ts");
@@ -293,8 +304,51 @@ function buildSteps(
   return [...deduped.values()];
 }
 
-export async function resolveStepsForContext(
+function hashJsonRecord(value: Record<string, unknown>): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
+}
+
+function resolveStepsCacheKey(params: ResolveStepsForContextParams, config: Record<string, unknown>): string {
+  return JSON.stringify({
+    sourceAgentId: params.sourceAgentId,
+    sessionKey: params.sessionKey ?? null,
+    sessionId: params.sessionId ?? null,
+    runId: params.runId ?? null,
+    configHash: hashJsonRecord(config),
+  });
+}
+
+function setToolCatalogStepsCache(key: string, steps: AgentControlStep[]): void {
+  const now = Date.now();
+  toolCatalogStepsCache.set(key, {
+    at: now,
+    expiresAt: now + TOOL_CATALOG_STEPS_CACHE_TTL_MS,
+    steps,
+  });
+  if (toolCatalogStepsCache.size > TOOL_CATALOG_STEPS_CACHE_MAX) {
+    const oldest = toolCatalogStepsCache.keys().next().value;
+    if (typeof oldest === "string") {
+      toolCatalogStepsCache.delete(oldest);
+    }
+  }
+}
+
+function setToolCatalogStepsCachePromise(
+  key: string,
+  promise: Promise<AgentControlStep[]>,
+): void {
+  toolCatalogStepsCache.set(key, { at: Date.now(), promise });
+  if (toolCatalogStepsCache.size > TOOL_CATALOG_STEPS_CACHE_MAX) {
+    const oldest = toolCatalogStepsCache.keys().next().value;
+    if (typeof oldest === "string" && oldest !== key) {
+      toolCatalogStepsCache.delete(oldest);
+    }
+  }
+}
+
+async function resolveFreshStepsForContext(
   params: ResolveStepsForContextParams,
+  config: Record<string, unknown>,
 ): Promise<AgentControlStep[]> {
   const resolveStartedAt = process.hrtime.bigint();
   const internalsStartedAt = process.hrtime.bigint();
@@ -307,7 +361,7 @@ export async function resolveStepsForContext(
     sessionKey: params.sessionKey,
     sessionId: params.sessionId,
     runId: params.runId,
-    config: sanitizeToolCatalogConfig(toJsonRecord(params.api.config) ?? {}),
+    config,
     // Keep the synced step catalog permissive so guardrail policy sees the full
     // internal tool surface when sender ownership is unknown in this hook context.
     senderIsOwner: true,
@@ -331,4 +385,40 @@ export async function resolveStepsForContext(
   );
 
   return steps;
+}
+
+export async function resolveStepsForContext(
+  params: ResolveStepsForContextParams,
+): Promise<AgentControlStep[]> {
+  const resolveStartedAt = process.hrtime.bigint();
+  const config = sanitizeToolCatalogConfig(toJsonRecord(params.api.config) ?? {});
+  const cacheKey = resolveStepsCacheKey(params, config);
+  const cached = toolCatalogStepsCache.get(cacheKey);
+  if (cached?.steps && cached.expiresAt && Date.now() < cached.expiresAt) {
+    params.logger.debug(
+      `agent-control: resolve_steps cache_hit duration_sec=${secondsSince(resolveStartedAt)} agent=${params.sourceAgentId} steps=${cached.steps.length}`,
+    );
+    return cached.steps;
+  }
+  if (cached?.promise) {
+    const steps = await cached.promise;
+    params.logger.debug(
+      `agent-control: resolve_steps cache_join duration_sec=${secondsSince(resolveStartedAt)} agent=${params.sourceAgentId} steps=${steps.length}`,
+    );
+    return steps;
+  }
+
+  const promise = resolveFreshStepsForContext(params, config);
+  setToolCatalogStepsCachePromise(cacheKey, promise);
+  try {
+    const steps = await promise;
+    setToolCatalogStepsCache(cacheKey, steps);
+    return steps;
+  } catch (err) {
+    const current = toolCatalogStepsCache.get(cacheKey);
+    if (current?.promise === promise) {
+      toolCatalogStepsCache.delete(cacheKey);
+    }
+    throw err;
+  }
 }

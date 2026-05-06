@@ -10,6 +10,7 @@ import {
 } from "./observability.ts";
 import { resolveStepsForContext } from "./tool-catalog.ts";
 import { buildEvaluationContext } from "./session-context.ts";
+import { warmSessionIdentityResolver } from "./session-store.ts";
 import {
   asPositiveInt,
   asString,
@@ -106,6 +107,7 @@ export default function register(api: OpenClawPluginApi) {
   const states = new Map<string, AgentState>();
   let gatewayWarmupPromise: Promise<void> | null = null;
   let gatewayWarmupStatus: "idle" | "running" | "done" | "failed" = "idle";
+  let sessionIdentityWarmupPromise: Promise<void> | null = null;
 
   const getOrCreateState = (sourceAgentId: string): AgentState => {
     const existing = states.get(sourceAgentId);
@@ -160,9 +162,36 @@ export default function register(api: OpenClawPluginApi) {
     return gatewayWarmupPromise;
   };
 
+  const ensureSessionIdentityWarmup = (): Promise<void> => {
+    if (sessionIdentityWarmupPromise) {
+      return sessionIdentityWarmupPromise;
+    }
+
+    const warmupStartedAt = process.hrtime.bigint();
+    sessionIdentityWarmupPromise = warmSessionIdentityResolver({
+      api,
+      sourceAgentId: BOOT_WARMUP_AGENT_ID,
+    })
+      .then(() => {
+        logger.debug(
+          `agent-control: session_identity_warmup done duration_sec=${secondsSince(warmupStartedAt)}`,
+        );
+      })
+      .catch((err) => {
+        logger.debug(
+          `agent-control: session_identity_warmup failed duration_sec=${secondsSince(warmupStartedAt)} error=${formatAgentControlError(err)}`,
+        );
+      });
+
+    return sessionIdentityWarmupPromise;
+  };
+
   const syncAgent = async (state: AgentState): Promise<void> => {
     if (state.syncPromise) {
       await state.syncPromise;
+      if (state.lastSyncedStepsHash !== state.stepsHash) {
+        await syncAgent(state);
+      }
       return;
     }
     if (state.lastSyncedStepsHash === state.stepsHash) {
@@ -205,6 +234,7 @@ export default function register(api: OpenClawPluginApi) {
   };
 
   api.on("gateway_start", async () => {
+    void ensureSessionIdentityWarmup();
     await ensureGatewayWarmup();
   });
 

@@ -77,7 +77,18 @@ function createLogger() {
   };
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.doUnmock("../src/openclaw-runtime.ts");
 });
 
@@ -219,5 +230,189 @@ describe("resolveStepsForContext", () => {
       openClawRoot,
       ["src/agents/pi-tool-definition-adapter.ts"],
     );
+  });
+
+  it("caches resolved steps briefly for the same agent, session, and config", async () => {
+    // Given an expensive OpenClaw tool catalog resolver for one session
+    vi.useFakeTimers();
+    const createOpenClawCodingTools = vi
+      .fn()
+      .mockReturnValueOnce(["first-tool-marker"])
+      .mockReturnValueOnce(["second-tool-marker"]);
+    const toToolDefinitions = vi
+      .fn()
+      .mockReturnValueOnce([
+        {
+          name: "shell",
+          label: "Shell",
+          description: "Run a shell command",
+          parameters: { type: "object" },
+        },
+      ])
+      .mockReturnValueOnce([
+        {
+          name: "grep",
+          label: "Grep",
+          description: "Search files",
+          parameters: { type: "object" },
+        },
+      ]);
+
+    const { resolveStepsForContext } = await loadToolCatalogModule({
+      openClawRoot: fs.mkdtempSync(path.join(os.tmpdir(), "tool-catalog-cache-")),
+      distPiToolsModule: { createOpenClawCodingTools },
+      distAdapterModule: { toToolDefinitions },
+    });
+    const logger = createLogger();
+    const request = {
+      api: createApi({ mode: "test" }),
+      logger,
+      sourceAgentId: "worker-1",
+      sessionKey: "agent:worker-1:slack:direct:alice",
+    };
+
+    // When the same context is resolved twice before the cache TTL expires
+    const first = await resolveStepsForContext(request);
+    const second = await resolveStepsForContext(request);
+
+    // Then the second call reuses the cached step catalog
+    expect(second).toEqual(first);
+    expect(createOpenClawCodingTools).toHaveBeenCalledTimes(1);
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("resolve_steps cache_hit"));
+
+    // When the cache TTL expires
+    vi.advanceTimersByTime(30_001);
+    const refreshed = await resolveStepsForContext(request);
+
+    // Then the catalog is refreshed from OpenClaw internals
+    expect(refreshed).toEqual([
+      {
+        type: "tool",
+        name: "grep",
+        description: "Search files",
+        inputSchema: { type: "object" },
+        metadata: { label: "Grep" },
+      },
+    ]);
+    expect(createOpenClawCodingTools).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reuse cached steps across different run context identifiers", async () => {
+    // Given two calls with the same session key but different run context identifiers
+    const createOpenClawCodingTools = vi
+      .fn()
+      .mockReturnValueOnce(["first-tool-marker"])
+      .mockReturnValueOnce(["second-tool-marker"]);
+    const toToolDefinitions = vi
+      .fn()
+      .mockReturnValueOnce([
+        {
+          name: "shell",
+          label: "Shell",
+          description: "Run a shell command",
+          parameters: { type: "object" },
+        },
+      ])
+      .mockReturnValueOnce([
+        {
+          name: "grep",
+          label: "Grep",
+          description: "Search files",
+          parameters: { type: "object" },
+        },
+      ]);
+
+    const { resolveStepsForContext } = await loadToolCatalogModule({
+      openClawRoot: fs.mkdtempSync(path.join(os.tmpdir(), "tool-catalog-run-context-")),
+      distPiToolsModule: { createOpenClawCodingTools },
+      distAdapterModule: { toToolDefinitions },
+    });
+    const baseRequest = {
+      api: createApi({ mode: "test" }),
+      logger: createLogger(),
+      sourceAgentId: "worker-1",
+      sessionKey: "agent:worker-1:slack:direct:alice",
+    };
+
+    // When steps are resolved for different session and run identifiers
+    const first = await resolveStepsForContext({
+      ...baseRequest,
+      sessionId: "session-1",
+      runId: "run-1",
+    });
+    const second = await resolveStepsForContext({
+      ...baseRequest,
+      sessionId: "session-2",
+      runId: "run-2",
+    });
+
+    // Then each context resolves its own catalog rather than sharing a stale cache entry
+    expect(first).toEqual([
+      {
+        type: "tool",
+        name: "shell",
+        description: "Run a shell command",
+        inputSchema: { type: "object" },
+        metadata: { label: "Shell" },
+      },
+    ]);
+    expect(second).toEqual([
+      {
+        type: "tool",
+        name: "grep",
+        description: "Search files",
+        inputSchema: { type: "object" },
+        metadata: { label: "Grep" },
+      },
+    ]);
+    expect(createOpenClawCodingTools).toHaveBeenCalledTimes(2);
+  });
+
+  it("deduplicates concurrent step resolution for the same cache key", async () => {
+    // Given OpenClaw internals are still loading when two identical step resolutions start
+    const internalsDeferred = createDeferred<Record<string, unknown> | null>();
+    const createOpenClawCodingTools = vi.fn(() => ["tool-marker"]);
+    const toToolDefinitions = vi.fn(() => [
+      {
+        name: "shell",
+        label: "Shell",
+        description: "Run a shell command",
+        parameters: { type: "object" },
+      },
+    ]);
+    vi.resetModules();
+
+    const tryImportOpenClawInternalModule = vi.fn(() => internalsDeferred.promise);
+    vi.doMock("../src/openclaw-runtime.ts", () => ({
+      getResolvedOpenClawRootDir: () => "/openclaw",
+      tryImportOpenClawInternalModule,
+      importOpenClawInternalModule: vi.fn(),
+      normalizeRelativeImportPath: vi.fn(),
+      PLUGIN_ROOT_DIR: "/plugin",
+      readPackageVersion: vi.fn(() => "1.0.0"),
+      safeStatMtimeMs: vi.fn(() => null),
+    }));
+
+    const { resolveStepsForContext } = await import("../src/tool-catalog.ts");
+    const logger = createLogger();
+    const request = {
+      api: createApi({ mode: "test" }),
+      logger,
+      sourceAgentId: "worker-1",
+      sessionKey: "agent:worker-1:slack:direct:alice",
+    };
+
+    // When both callers request the same catalog before internals finish loading
+    const firstPromise = resolveStepsForContext(request);
+    const secondPromise = resolveStepsForContext(request);
+    await Promise.resolve();
+    internalsDeferred.resolve({ createOpenClawCodingTools, toToolDefinitions });
+
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+
+    // Then both callers share one resolver invocation and receive the same steps
+    expect(first).toEqual(second);
+    expect(createOpenClawCodingTools).toHaveBeenCalledTimes(1);
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("resolve_steps cache_join"));
   });
 });

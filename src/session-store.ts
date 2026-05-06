@@ -1,6 +1,7 @@
 import type { SessionIdentitySnapshot, SessionMetadataCacheEntry, SessionStoreInternals } from "./types.ts";
 import { asString, isRecord } from "./shared.ts";
 import { getResolvedOpenClawRootDir, importOpenClawInternalModule } from "./openclaw-runtime.ts";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 
 const SESSION_META_CACHE_TTL_MS = 2_000;
 const SESSION_META_CACHE_MAX = 512;
@@ -8,7 +9,40 @@ const SESSION_META_CACHE_MAX = 512;
 let sessionStoreInternalsPromise: Promise<SessionStoreInternals> | null = null;
 const sessionMetadataCache = new Map<string, SessionMetadataCacheEntry>();
 
-async function loadSessionStoreInternals(): Promise<SessionStoreInternals> {
+function resolveRuntimeSessionStoreInternals(
+  api: OpenClawPluginApi | undefined,
+): SessionStoreInternals | null {
+  const runtime = isRecord(api?.runtime) ? api.runtime : undefined;
+  const runtimeConfig = isRecord(runtime?.config) ? runtime.config : undefined;
+  const runtimeAgent = isRecord(runtime?.agent) ? runtime.agent : undefined;
+  const runtimeAgentSession = isRecord(runtimeAgent?.session) ? runtimeAgent.session : undefined;
+
+  const resolveStorePath = runtimeAgentSession?.resolveStorePath;
+  const loadSessionStore = runtimeAgentSession?.loadSessionStore;
+  if (typeof resolveStorePath !== "function" || typeof loadSessionStore !== "function") {
+    return null;
+  }
+
+  const loadConfig = runtimeConfig?.loadConfig;
+  const fallbackConfig = isRecord(api?.config) ? api.config : {};
+  return {
+    loadConfig:
+      typeof loadConfig === "function"
+        ? (loadConfig as SessionStoreInternals["loadConfig"])
+        : () => fallbackConfig,
+    resolveStorePath: resolveStorePath as SessionStoreInternals["resolveStorePath"],
+    loadSessionStore: loadSessionStore as SessionStoreInternals["loadSessionStore"],
+  };
+}
+
+async function loadSessionStoreInternals(
+  api: OpenClawPluginApi | undefined,
+): Promise<SessionStoreInternals> {
+  const runtimeInternals = resolveRuntimeSessionStoreInternals(api);
+  if (runtimeInternals) {
+    return runtimeInternals;
+  }
+
   if (sessionStoreInternalsPromise) {
     return sessionStoreInternalsPromise;
   }
@@ -50,6 +84,19 @@ async function loadSessionStoreInternals(): Promise<SessionStoreInternals> {
   return sessionStoreInternalsPromise;
 }
 
+export async function warmSessionIdentityResolver(params: {
+  api: OpenClawPluginApi;
+  sourceAgentId?: string;
+}): Promise<void> {
+  const internals = await loadSessionStoreInternals(params.api);
+  const cfg = internals.loadConfig();
+  const sessionCfg = isRecord(cfg.session) ? cfg.session : undefined;
+  const storePath = internals.resolveStorePath(asString(sessionCfg?.store), {
+    agentId: asString(params.sourceAgentId),
+  });
+  internals.loadSessionStore(storePath);
+}
+
 function unknownSessionIdentity(): SessionIdentitySnapshot {
   return {
     provider: null,
@@ -78,6 +125,18 @@ function resolveBaseSessionKey(sessionKey: string): string {
   }
   const base = sessionKey.slice(0, markerIndex);
   return base || sessionKey;
+}
+
+function resolveSessionAgentId(
+  normalizedSessionKey: string,
+  sourceAgentId: string | undefined,
+): string | undefined {
+  const parts = normalizedSessionKey.split(":").filter(Boolean);
+  if (parts.length >= 2 && parts[0] === "agent" && parts[1]) {
+    return parts[1];
+  }
+  const normalizedSourceAgentId = asString(sourceAgentId);
+  return normalizedSourceAgentId === "default" ? undefined : normalizedSourceAgentId;
 }
 
 function readSessionIdentityFromEntry(entry: Record<string, unknown>): SessionIdentitySnapshot {
@@ -120,7 +179,12 @@ function readSessionIdentityFromEntry(entry: Record<string, unknown>): SessionId
 }
 
 function setSessionMetadataCache(key: string, data: SessionIdentitySnapshot): void {
-  sessionMetadataCache.set(key, { at: Date.now(), data });
+  const now = Date.now();
+  sessionMetadataCache.set(key, {
+    at: now,
+    data,
+    expiresAt: now + SESSION_META_CACHE_TTL_MS,
+  });
   if (sessionMetadataCache.size > SESSION_META_CACHE_MAX) {
     const oldest = sessionMetadataCache.keys().next().value;
     if (typeof oldest === "string") {
@@ -129,36 +193,115 @@ function setSessionMetadataCache(key: string, data: SessionIdentitySnapshot): vo
   }
 }
 
-export async function resolveSessionIdentity(
-  sessionKey: string | undefined,
-): Promise<SessionIdentitySnapshot> {
-  const normalizedKey = normalizeSessionStoreKey(sessionKey);
-  if (!normalizedKey) {
-    return unknownSessionIdentity();
+function setSessionMetadataCachePromise(
+  key: string,
+  promise: Promise<SessionIdentitySnapshot>,
+): void {
+  sessionMetadataCache.set(key, { at: Date.now(), promise });
+  if (sessionMetadataCache.size > SESSION_META_CACHE_MAX) {
+    const oldest = sessionMetadataCache.keys().next().value;
+    if (typeof oldest === "string" && oldest !== key) {
+      sessionMetadataCache.delete(oldest);
+    }
   }
+}
 
-  const cached = sessionMetadataCache.get(normalizedKey);
-  if (cached && Date.now() - cached.at < SESSION_META_CACHE_TTL_MS) {
-    return cached.data;
-  }
-
+async function readSessionIdentity(params: {
+  normalizedKey: string;
+  internals: SessionStoreInternals;
+  storePath: string;
+}): Promise<SessionIdentitySnapshot> {
   try {
-    const internals = await loadSessionStoreInternals();
-    const cfg = internals.loadConfig();
-    const sessionCfg = isRecord(cfg.session) ? cfg.session : undefined;
-    const storePath = internals.resolveStorePath(asString(sessionCfg?.store));
-    const store = internals.loadSessionStore(storePath);
-    const directEntry = store[normalizedKey];
-    const baseEntry = store[resolveBaseSessionKey(normalizedKey)];
+    const store = params.internals.loadSessionStore(params.storePath);
+    const directEntry = store[params.normalizedKey];
+    const baseEntry = store[resolveBaseSessionKey(params.normalizedKey)];
     const entry: Record<string, unknown> | undefined = isRecord(directEntry)
       ? directEntry
       : isRecord(baseEntry)
         ? baseEntry
         : undefined;
-    const data = entry ? readSessionIdentityFromEntry(entry) : unknownSessionIdentity();
-    setSessionMetadataCache(normalizedKey, data);
-    return data;
+    return entry ? readSessionIdentityFromEntry(entry) : unknownSessionIdentity();
   } catch {
     return unknownSessionIdentity();
   }
+}
+
+function buildSessionMetadataCacheKey(params: {
+  normalizedKey: string;
+  storePath: string;
+}): string {
+  return JSON.stringify({
+    normalizedKey: params.normalizedKey,
+    storePath: params.storePath,
+  });
+}
+
+async function resolveSessionStoreLookupContext(params: {
+  api?: OpenClawPluginApi;
+  normalizedKey: string;
+  sourceAgentId?: string;
+}): Promise<{ internals: SessionStoreInternals; storePath: string } | null> {
+  try {
+    const internals = await loadSessionStoreInternals(params.api);
+    const cfg = internals.loadConfig();
+    const sessionCfg = isRecord(cfg.session) ? cfg.session : undefined;
+    const storeAgentId = resolveSessionAgentId(params.normalizedKey, params.sourceAgentId);
+    const storePath = internals.resolveStorePath(asString(sessionCfg?.store), {
+      agentId: storeAgentId,
+    });
+    return { internals, storePath };
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveSessionIdentity(
+  input:
+    | string
+    | undefined
+    | {
+        api?: OpenClawPluginApi;
+        sessionKey?: string;
+        sourceAgentId?: string;
+      },
+): Promise<SessionIdentitySnapshot> {
+  const sessionKey = typeof input === "object" ? input.sessionKey : input;
+  const api = typeof input === "object" ? input.api : undefined;
+  const sourceAgentId = typeof input === "object" ? input.sourceAgentId : undefined;
+  const normalizedKey = normalizeSessionStoreKey(sessionKey);
+  if (!normalizedKey) {
+    return unknownSessionIdentity();
+  }
+
+  const lookupContext = await resolveSessionStoreLookupContext({
+    api,
+    normalizedKey,
+    sourceAgentId,
+  });
+  if (!lookupContext) {
+    return unknownSessionIdentity();
+  }
+
+  const cacheKey = buildSessionMetadataCacheKey({
+    normalizedKey,
+    storePath: lookupContext.storePath,
+  });
+  const cached = sessionMetadataCache.get(cacheKey);
+  if (cached?.data && cached.expiresAt && Date.now() < cached.expiresAt) {
+    return cached.data;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+
+  const promise = readSessionIdentity({
+    normalizedKey,
+    internals: lookupContext.internals,
+    storePath: lookupContext.storePath,
+  }).then((data) => {
+    setSessionMetadataCache(cacheKey, data);
+    return data;
+  });
+  setSessionMetadataCachePromise(cacheKey, promise);
+  return promise;
 }

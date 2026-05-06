@@ -19,6 +19,20 @@ declare module "openclaw/plugin-sdk/core" {
     version?: string;
     config: Record<string, unknown>;
     pluginConfig?: unknown;
+    runtime?: {
+      config?: {
+        loadConfig?: () => Record<string, unknown>;
+      };
+      agent?: {
+        session?: {
+          resolveStorePath?: (storePath?: string, opts?: { agentId?: string }) => string;
+          loadSessionStore?: (
+            storePath: string,
+            opts?: Record<string, unknown>,
+          ) => Record<string, unknown>;
+        };
+      };
+    };
     logger: {
       info(message: string): void;
       warn(message: string): void;

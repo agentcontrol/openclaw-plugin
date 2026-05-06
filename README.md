@@ -35,7 +35,7 @@ This plugin integrates OpenClaw with [Agent Control](https://github.com/agentcon
 
 When the gateway starts, the plugin loads the OpenClaw tool catalog and syncs it to Agent Control. On every tool call, the plugin intercepts the invocation through a `before_tool_call` hook, builds an evaluation context (session, channel, provider, agent identity), and sends it to Agent Control for a policy decision. If the evaluation comes back safe the call proceeds normally. If it comes back denied the call is blocked and the user sees a rejection message.
 
-The plugin handles multiple agents, tracks tool catalog changes between calls, and re-syncs automatically when the catalog drifts.
+The plugin handles multiple agents, caches the resolved tool catalog briefly to keep the pre-tool hook fast, and re-syncs automatically when the catalog drifts.
 
 ## Quick start
 

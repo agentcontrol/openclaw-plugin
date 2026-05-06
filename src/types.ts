@@ -69,8 +69,8 @@ export type ToolCatalogInternals = {
 
 export type SessionStoreInternals = {
   loadConfig: () => Record<string, unknown>;
-  resolveStorePath: (storePath?: string) => string;
-  loadSessionStore: (storePath: string) => Record<string, unknown>;
+  resolveStorePath: (storePath?: string, opts?: { agentId?: string }) => string;
+  loadSessionStore: (storePath: string, opts?: Record<string, unknown>) => Record<string, unknown>;
 };
 
 export type SessionIdentitySnapshot = {
@@ -87,7 +87,9 @@ export type SessionIdentitySnapshot = {
 
 export type SessionMetadataCacheEntry = {
   at: number;
-  data: SessionIdentitySnapshot;
+  data?: SessionIdentitySnapshot;
+  expiresAt?: number;
+  promise?: Promise<SessionIdentitySnapshot>;
 };
 
 export type LoggerLike = Pick<OpenClawPluginApi["logger"], "info" | "warn">;
