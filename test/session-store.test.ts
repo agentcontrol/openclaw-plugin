@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 
 type SessionStoreFixture = {
   config?: Record<string, unknown>;
@@ -31,6 +32,7 @@ async function loadSessionStoreModule(fixture: SessionStoreFixture = {}) {
   const module = await import("../src/session-store.ts");
   return {
     resolveSessionIdentity: module.resolveSessionIdentity,
+    warmSessionIdentityResolver: module.warmSessionIdentityResolver,
     mocks: {
       importOpenClawInternalModule,
       loadConfig,
@@ -38,6 +40,35 @@ async function loadSessionStoreModule(fixture: SessionStoreFixture = {}) {
       loadSessionStore,
       setStore(store: Record<string, unknown>) {
         currentStore = store;
+      },
+    },
+  };
+}
+
+function createApi(params: {
+  config?: Record<string, unknown>;
+  loadConfig?: () => Record<string, unknown>;
+  resolveStorePath?: (storePath?: string, opts?: { agentId?: string }) => string;
+  loadSessionStore?: (storePath: string) => Record<string, unknown>;
+}): OpenClawPluginApi {
+  return {
+    id: "agent-control-openclaw-plugin",
+    version: "test-version",
+    config: params.config ?? {},
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+    },
+    on: vi.fn(),
+    runtime: {
+      config: {
+        loadConfig: params.loadConfig,
+      },
+      agent: {
+        session: {
+          resolveStorePath: params.resolveStorePath,
+          loadSessionStore: params.loadSessionStore,
+        },
       },
     },
   };
@@ -168,7 +199,7 @@ describe("resolveSessionIdentity", () => {
   });
 
   it("refreshes the identity after the TTL expires", async () => {
-    // Given cached session metadata and a store update after the TTL window
+    // Given cached session-store metadata and a store update after the known-metadata TTL window
     vi.useFakeTimers();
     const { resolveSessionIdentity, mocks } = await loadSessionStoreModule({
       initialStore: {
@@ -196,13 +227,115 @@ describe("resolveSessionIdentity", () => {
         },
       },
     });
-    vi.advanceTimersByTime(2_001);
+    vi.advanceTimersByTime(60_001);
 
     // Then the refreshed identity is returned and the store is reloaded
     await expect(resolveSessionIdentity("agent:worker-1:slack:direct:alice")).resolves.toMatchObject({
       label: "Bob",
     });
     expect(mocks.loadSessionStore).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses injected runtime helpers before falling back to internal imports", async () => {
+    // Given OpenClaw provides session-store helpers through the plugin runtime
+    const { resolveSessionIdentity, mocks } = await loadSessionStoreModule({
+      throws: true,
+    });
+    const loadConfig = vi.fn(() => ({
+      session: {
+        store: "/tmp/{agentId}/sessions.json",
+      },
+    }));
+    const resolveStorePath = vi.fn(
+      (storePath?: string, opts?: { agentId?: string }) =>
+        (storePath ?? "").replace("{agentId}", opts?.agentId ?? "main"),
+    );
+    const loadSessionStore = vi.fn(() => ({
+      "agent:worker-1:slack:direct:alice": {
+        origin: {
+          provider: "slack",
+          chatType: "direct",
+          label: "Alice",
+        },
+      },
+    }));
+    const api = createApi({ loadConfig, resolveStorePath, loadSessionStore });
+
+    // When identity is resolved with a runtime-aware API object
+    const identity = await resolveSessionIdentity({
+      api,
+      sessionKey: "agent:worker-1:slack:direct:alice",
+    });
+
+    // Then runtime helpers are used and the store path is scoped to the session agent
+    expect(identity).toMatchObject({
+      provider: "slack",
+      type: "direct",
+      label: "Alice",
+      source: "sessionStore",
+    });
+    expect(resolveStorePath).toHaveBeenCalledWith("/tmp/{agentId}/sessions.json", {
+      agentId: "worker-1",
+    });
+    expect(loadSessionStore).toHaveBeenCalledWith("/tmp/worker-1/sessions.json");
+    expect(mocks.importOpenClawInternalModule).not.toHaveBeenCalled();
+  });
+
+  it("warms the session store through injected runtime helpers", async () => {
+    // Given runtime helpers are available for the default source agent
+    const { warmSessionIdentityResolver, mocks } = await loadSessionStoreModule({
+      throws: true,
+    });
+    const loadConfig = vi.fn(() => ({
+      session: {
+        store: "/tmp/{agentId}/sessions.json",
+      },
+    }));
+    const resolveStorePath = vi.fn(
+      (storePath?: string, opts?: { agentId?: string }) =>
+        (storePath ?? "").replace("{agentId}", opts?.agentId ?? "main"),
+    );
+    const loadSessionStore = vi.fn(() => ({}));
+    const api = createApi({ loadConfig, resolveStorePath, loadSessionStore });
+
+    // When the resolver is warmed for the default source agent
+    await warmSessionIdentityResolver({
+      api,
+      sourceAgentId: "main",
+    });
+
+    // Then the backing store is loaded once through the runtime path
+    expect(resolveStorePath).toHaveBeenCalledWith("/tmp/{agentId}/sessions.json", {
+      agentId: "main",
+    });
+    expect(loadSessionStore).toHaveBeenCalledWith("/tmp/main/sessions.json");
+    expect(mocks.importOpenClawInternalModule).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates concurrent lookups for the same session key", async () => {
+    // Given session-store internals that resolve asynchronously
+    const { resolveSessionIdentity, mocks } = await loadSessionStoreModule({
+      initialStore: {
+        "agent:worker-1:slack:direct:alice": {
+          origin: {
+            provider: "slack",
+            chatType: "direct",
+            label: "Alice",
+          },
+        },
+      },
+    });
+
+    // When two callers resolve the same session before the first lookup finishes
+    const [first, second] = await Promise.all([
+      resolveSessionIdentity("agent:worker-1:slack:direct:alice"),
+      resolveSessionIdentity("agent:worker-1:slack:direct:alice"),
+    ]);
+
+    // Then the backing store is loaded once and both callers receive the identity
+    expect(first.label).toBe("Alice");
+    expect(second.label).toBe("Alice");
+    expect(mocks.loadSessionStore).toHaveBeenCalledTimes(1);
   });
 
   it("returns an unknown identity when session-store internals cannot be loaded", async () => {

@@ -78,6 +78,7 @@ function createLogger() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.doUnmock("../src/openclaw-runtime.ts");
 });
 
@@ -219,5 +220,70 @@ describe("resolveStepsForContext", () => {
       openClawRoot,
       ["src/agents/pi-tool-definition-adapter.ts"],
     );
+  });
+
+  it("caches resolved steps briefly for the same agent, session, and config", async () => {
+    // Given an expensive OpenClaw tool catalog resolver for one session
+    vi.useFakeTimers();
+    const createOpenClawCodingTools = vi
+      .fn()
+      .mockReturnValueOnce(["first-tool-marker"])
+      .mockReturnValueOnce(["second-tool-marker"]);
+    const toToolDefinitions = vi
+      .fn()
+      .mockReturnValueOnce([
+        {
+          name: "shell",
+          label: "Shell",
+          description: "Run a shell command",
+          parameters: { type: "object" },
+        },
+      ])
+      .mockReturnValueOnce([
+        {
+          name: "grep",
+          label: "Grep",
+          description: "Search files",
+          parameters: { type: "object" },
+        },
+      ]);
+
+    const { resolveStepsForContext } = await loadToolCatalogModule({
+      openClawRoot: fs.mkdtempSync(path.join(os.tmpdir(), "tool-catalog-cache-")),
+      distPiToolsModule: { createOpenClawCodingTools },
+      distAdapterModule: { toToolDefinitions },
+    });
+    const logger = createLogger();
+    const request = {
+      api: createApi({ mode: "test" }),
+      logger,
+      sourceAgentId: "worker-1",
+      sessionKey: "agent:worker-1:slack:direct:alice",
+    };
+
+    // When the same context is resolved twice before the cache TTL expires
+    const first = await resolveStepsForContext(request);
+    const second = await resolveStepsForContext(request);
+
+    // Then the second call reuses the cached step catalog
+    expect(second).toEqual(first);
+    expect(createOpenClawCodingTools).toHaveBeenCalledTimes(1);
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("resolve_steps cache_hit"));
+
+    // When the cache TTL expires
+    vi.advanceTimersByTime(30_001);
+    const refreshed = await resolveStepsForContext(request);
+
+    // Then the catalog is refreshed from OpenClaw internals
+    expect(refreshed).toEqual([
+      {
+        type: "tool",
+        name: "grep",
+        description: "Search files",
+        inputSchema: { type: "object" },
+        metadata: { label: "Grep" },
+      },
+    ]);
+    expect(createOpenClawCodingTools).toHaveBeenCalledTimes(2);
   });
 });

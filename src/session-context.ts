@@ -83,7 +83,11 @@ export async function buildEvaluationContext(params: {
   configuredAgentVersion?: string;
 }): Promise<Record<string, unknown>> {
   const channelFromSessionKey = deriveChannelContext(params.ctx.sessionKey);
-  const sessionIdentity = await resolveSessionIdentity(params.ctx.sessionKey);
+  const sessionIdentity = await resolveSessionIdentity({
+    api: params.api,
+    sessionKey: params.ctx.sessionKey,
+    sourceAgentId: params.sourceAgentId,
+  });
   const mergedChannelType =
     sessionIdentity.type !== "unknown" ? sessionIdentity.type : channelFromSessionKey.type;
   const mergedChannelProvider = sessionIdentity.provider ?? channelFromSessionKey.provider;
