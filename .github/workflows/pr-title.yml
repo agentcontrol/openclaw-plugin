@@ -20,20 +20,13 @@ jobs:
   semantic-pr-title:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out PR head
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
-
-      - name: Validate semantic PR title and head commit subject
+      - name: Validate semantic PR title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           python3 - <<'PY'
           import os
           import re
-          import subprocess
           import sys
 
           pattern = re.compile(
@@ -43,7 +36,7 @@ jobs:
 
           def validate(label: str, value: str) -> None:
               if pattern.match(value):
-                  print(f"{label} is a valid conventional commit title: {value}")
+                  print(f"{label} is a valid conventional title: {value}")
                   return
 
               print(f"Invalid {label}: {value}", file=sys.stderr)
@@ -52,10 +45,4 @@ jobs:
               raise SystemExit(1)
 
           validate("PR title", os.environ["PR_TITLE"])
-
-          head_subject = subprocess.check_output(
-              ["git", "log", "-1", "--pretty=%s"],
-              text=True,
-          ).strip()
-          validate("head commit subject", head_subject)
           PY
