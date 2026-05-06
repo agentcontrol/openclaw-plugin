@@ -482,6 +482,45 @@ describe("agent-control plugin logging and blocking", () => {
     expect(clientMocks.evaluationEvaluate).toHaveBeenCalledTimes(2);
   });
 
+  it("waits for catch-up sync before evaluating joined callers when steps change", async () => {
+    // Given one tool call changes the step catalog while a joined caller waits on an in-flight sync
+    const api = createMockApi({
+      serverUrl: "http://localhost:8000",
+    });
+    const syncDeferred = createDeferred<void>();
+    clientMocks.agentsInit
+      .mockImplementationOnce(() => syncDeferred.promise)
+      .mockResolvedValueOnce(undefined);
+    resolveStepsForContextMock
+      .mockResolvedValueOnce([{ type: "tool", name: "shell" }])
+      .mockResolvedValueOnce([
+        { type: "tool", name: "shell" },
+        { type: "tool", name: "grep" },
+      ]);
+
+    // When the joined caller updates steps before the original sync resolves
+    register(api.api);
+    const first = runBeforeToolCall(api);
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = runBeforeToolCall(api, { toolName: "grep" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(clientMocks.agentsInit).toHaveBeenCalledTimes(1);
+    expect(clientMocks.evaluationEvaluate).not.toHaveBeenCalled();
+
+    syncDeferred.resolve(undefined);
+    await Promise.all([first, second]);
+
+    // Then both callers wait until the catch-up sync completes before evaluating
+    expect(clientMocks.agentsInit).toHaveBeenCalledTimes(2);
+    expect(clientMocks.evaluationEvaluate).toHaveBeenCalledTimes(2);
+    expect(clientMocks.evaluationEvaluate.mock.invocationCallOrder[0]).toBeGreaterThan(
+      clientMocks.agentsInit.mock.invocationCallOrder[1] ?? 0,
+    );
+  });
+
   it("skips resyncing when the step catalog has not changed", async () => {
     // Given a source agent whose step catalog is unchanged across two tool calls
     const api = createMockApi({

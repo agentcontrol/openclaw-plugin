@@ -299,6 +299,51 @@ describe("resolveSessionIdentity", () => {
     expect(mocks.importOpenClawInternalModule).not.toHaveBeenCalled();
   });
 
+  it("uses the OpenClaw default store for legacy keys when source agent is synthetic default", async () => {
+    // Given the plugin fallback source agent ID is the synthetic default value
+    const { resolveSessionIdentity, mocks } = await loadSessionStoreModule({
+      throws: true,
+    });
+    const loadConfig = vi.fn(() => ({
+      session: {
+        store: "/tmp/{agentId}/sessions.json",
+      },
+    }));
+    const resolveStorePath = vi.fn(
+      (storePath?: string, opts?: { agentId?: string }) =>
+        (storePath ?? "").replace("{agentId}", opts?.agentId ?? "main"),
+    );
+    const loadSessionStore = vi.fn(() => ({
+      "legacy-session": {
+        origin: {
+          provider: "slack",
+          chatType: "direct",
+          label: "Alice",
+        },
+      },
+    }));
+    const api = createApi({ loadConfig, resolveStorePath, loadSessionStore });
+
+    // When identity is resolved for a non-agent-prefixed session key
+    const identity = await resolveSessionIdentity({
+      api,
+      sourceAgentId: "default",
+      sessionKey: "legacy-session",
+    });
+
+    // Then the OpenClaw runtime resolves its own default agent store
+    expect(identity).toMatchObject({
+      provider: "slack",
+      type: "direct",
+      label: "Alice",
+    });
+    expect(resolveStorePath).toHaveBeenCalledWith("/tmp/{agentId}/sessions.json", {
+      agentId: undefined,
+    });
+    expect(loadSessionStore).toHaveBeenCalledWith("/tmp/main/sessions.json");
+    expect(mocks.importOpenClawInternalModule).not.toHaveBeenCalled();
+  });
+
   it("uses injected runtime helpers before falling back to internal imports", async () => {
     // Given OpenClaw provides session-store helpers through the plugin runtime
     const { resolveSessionIdentity, mocks } = await loadSessionStoreModule({

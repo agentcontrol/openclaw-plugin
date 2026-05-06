@@ -189,6 +189,9 @@ export default function register(api: OpenClawPluginApi) {
   const syncAgent = async (state: AgentState): Promise<void> => {
     if (state.syncPromise) {
       await state.syncPromise;
+      if (state.lastSyncedStepsHash !== state.stepsHash) {
+        await syncAgent(state);
+      }
       return;
     }
     if (state.lastSyncedStepsHash === state.stepsHash) {

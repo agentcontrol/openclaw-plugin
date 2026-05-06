@@ -135,7 +135,8 @@ function resolveSessionAgentId(
   if (parts.length >= 2 && parts[0] === "agent" && parts[1]) {
     return parts[1];
   }
-  return asString(sourceAgentId);
+  const normalizedSourceAgentId = asString(sourceAgentId);
+  return normalizedSourceAgentId === "default" ? undefined : normalizedSourceAgentId;
 }
 
 function readSessionIdentityFromEntry(entry: Record<string, unknown>): SessionIdentitySnapshot {
